@@ -1,3 +1,4 @@
+import { useState, useRef } from "react";
 import type { Room } from "../hooks/useSonos";
 
 interface Props {
@@ -21,6 +22,20 @@ export default function Rooms({
   rooms, activeRoom, onSetRoom,
   onVolume, onMute, onParty, onDissolve, onJoin, onUnjoin, onSolo,
 }: Props) {
+  const [dissolvePending, setDissolvePending] = useState(false);
+  const dissolveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const handleDissolve = () => {
+    if (dissolvePending) {
+      if (dissolveTimer.current) clearTimeout(dissolveTimer.current);
+      setDissolvePending(false);
+      onDissolve();
+    } else {
+      setDissolvePending(true);
+      dissolveTimer.current = setTimeout(() => setDissolvePending(false), 3000);
+    }
+  };
+
   const groupIds = new Set(rooms.map((r) => r.groupId).filter(Boolean));
   const allInOneGroup = groupIds.size === 1 && rooms.every((r) => r.groupId);
 
@@ -51,21 +66,26 @@ export default function Rooms({
             <span style={{ fontWeight: 600 }}>All {rooms.length} rooms grouped</span>
           </div>
           <button
-            onClick={onDissolve}
+            onClick={handleDissolve}
             style={{
-              background: "rgba(255,255,255,0.2)",
+              background: dissolvePending ? "rgba(200,75,75,0.85)" : "rgba(255,255,255,0.2)",
               color: "var(--warm-white)",
               padding: "8px 14px",
               borderRadius: 20,
               fontSize: 13,
               fontWeight: 600,
+              transition: "background 0.15s",
             }}
-          >Dissolve</button>
+          >{dissolvePending ? "Tap again to confirm" : "Dissolve"}</button>
         </div>
       ) : (
         <div style={{ display: "flex", gap: 10 }}>
           <ActionBtn onClick={onParty} bg="var(--label-teal)" icon="🎉">Party Mode</ActionBtn>
-          <ActionBtn onClick={onDissolve} bg="var(--label-red)" icon="💥">Dissolve</ActionBtn>
+          <ActionBtn
+            onClick={handleDissolve}
+            bg={dissolvePending ? "var(--label-red)" : "var(--label-red)"}
+            icon={dissolvePending ? "⚠️" : "💥"}
+          >{dissolvePending ? "Tap again to confirm" : "Dissolve"}</ActionBtn>
         </div>
       )}
 
