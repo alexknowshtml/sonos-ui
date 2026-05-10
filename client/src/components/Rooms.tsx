@@ -244,7 +244,7 @@ function RoomCard({ room, isCoordinator, allInOneGroup, active, onSelect, onVolu
       </div>
 
       {/* Volume */}
-      <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 14 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 14 }}>
         <span style={{
           color: "var(--mocha)",
           fontSize: 13,
@@ -252,12 +252,15 @@ function RoomCard({ room, isCoordinator, allInOneGroup, active, onSelect, onVolu
           textAlign: "right",
           fontWeight: 600,
           fontVariantNumeric: "tabular-nums",
+          flexShrink: 0,
         }}>{vol}%</span>
+        <RoomStepBtn onClick={() => onVolume(Math.max(0, vol - 5))}>−</RoomStepBtn>
         <input
           type="range" min={0} max={100} value={vol}
           onChange={(e) => onVolume(Number(e.target.value))}
           style={{ flex: 1, background: sliderFill(vol) }}
         />
+        <RoomStepBtn onClick={() => onVolume(Math.min(100, vol + 5))}>+</RoomStepBtn>
       </div>
 
       {/* Actions — simplified when all grouped */}
@@ -283,6 +286,28 @@ function SmallBtn({ children, onClick }: { children: React.ReactNode; onClick: (
         color: "var(--mocha)",
         fontSize: 12,
         fontWeight: 600,
+        border: "1px solid var(--sand)",
+      }}
+    >{children}</button>
+  );
+}
+
+function RoomStepBtn({ children, onClick }: { children: React.ReactNode; onClick: () => void }) {
+  return (
+    <button
+      onClick={onClick}
+      style={{
+        width: 34,
+        height: 34,
+        borderRadius: 8,
+        background: "var(--cream-dark)",
+        color: "var(--espresso)",
+        fontSize: 18,
+        fontWeight: 700,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        flexShrink: 0,
         border: "1px solid var(--sand)",
       }}
     >{children}</button>

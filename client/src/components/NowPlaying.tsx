@@ -96,23 +96,18 @@ export default function NowPlaying({
         padding: 16,
         border: "2px solid var(--cream-dark)",
       }}>
-        <div style={{
-          display: "flex",
-          justifyContent: "space-between",
-          marginBottom: 10,
-          color: "var(--walnut)",
-          fontSize: 13,
-          fontWeight: 600,
-        }}>
-          <span>🔈</span>
-          <span style={{ fontVariantNumeric: "tabular-nums", color: "var(--mocha)" }}>{vol}%</span>
-          <span>🔊</span>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <StepBtn onClick={() => onVolume(activeRoom, Math.max(0, vol - 5))}>−</StepBtn>
+          <div style={{ flex: 1 }}>
+            <input
+              type="range" min={0} max={100} value={vol}
+              onChange={(e) => onVolume(activeRoom, Number(e.target.value))}
+              style={{ background: `linear-gradient(to right, var(--label-teal) ${vol}%, var(--cream-dark) ${vol}%)` }}
+            />
+          </div>
+          <StepBtn onClick={() => onVolume(activeRoom, Math.min(100, vol + 5))}>+</StepBtn>
+          <span style={{ fontSize: 13, fontWeight: 600, fontVariantNumeric: "tabular-nums", color: "var(--mocha)", minWidth: 34, textAlign: "right" }}>{vol}%</span>
         </div>
-        <input
-          type="range" min={0} max={100} value={vol}
-          onChange={(e) => onVolume(activeRoom, Number(e.target.value))}
-          style={{ background: `linear-gradient(to right, var(--label-teal) ${vol}%, var(--cream-dark) ${vol}%)` }}
-        />
       </div>
 
       {/* Room selector */}
@@ -173,6 +168,28 @@ function TransportBtn({ children, onClick, size, primary }: {
       }}
       onPointerDown={(e) => (e.currentTarget.style.transform = "scale(0.92)")}
       onPointerUp={(e) => (e.currentTarget.style.transform = "scale(1)")}
+    >{children}</button>
+  );
+}
+
+function StepBtn({ children, onClick }: { children: React.ReactNode; onClick: () => void }) {
+  return (
+    <button
+      onClick={onClick}
+      style={{
+        width: 40,
+        height: 40,
+        borderRadius: 10,
+        background: "var(--cream-dark)",
+        color: "var(--espresso)",
+        fontSize: 20,
+        fontWeight: 700,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        flexShrink: 0,
+        border: "1px solid var(--sand)",
+      }}
     >{children}</button>
   );
 }
