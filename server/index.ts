@@ -99,17 +99,55 @@ startEventStream();
 let roomsCache: { data: any; ts: number } | null = null;
 let favCache: { data: any; ts: number } | null = null;
 
+// Direct UPnP RenderingControl — bypasses CLI group-coordinator routing
+function upnpSoap(ip: string, action: string, args: string) {
+  return fetch(`http://${ip}:1400/MediaRenderer/RenderingControl/Control`, {
+    method: "POST",
+    headers: {
+      "Content-Type": 'text/xml; charset="utf-8"',
+      SOAPAction: `"urn:schemas-upnp-org:service:RenderingControl:1#${action}"`,
+    },
+    body: `<?xml version="1.0"?><s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/"><s:Body><u:${action} xmlns:u="urn:schemas-upnp-org:service:RenderingControl:1">${args}</u:${action}></s:Body></s:Envelope>`,
+    signal: AbortSignal.timeout(3000),
+  }).then((r) => r.text());
+}
+
+async function getRoomVolume(ip: string): Promise<number> {
+  const xml = await upnpSoap(ip, "GetVolume", "<InstanceID>0</InstanceID><Channel>Master</Channel>");
+  const m = xml.match(/<CurrentVolume>(\d+)<\/CurrentVolume>/);
+  return m ? parseInt(m[1]) : 0;
+}
+
+async function getRoomMute(ip: string): Promise<boolean> {
+  const xml = await upnpSoap(ip, "GetMute", "<InstanceID>0</InstanceID><Channel>Master</Channel>");
+  const m = xml.match(/<CurrentMute>([01])<\/CurrentMute>/);
+  return m ? m[1] === "1" : false;
+}
+
+async function setRoomVolume(ip: string, level: number): Promise<void> {
+  await upnpSoap(ip, "SetVolume", `<InstanceID>0</InstanceID><Channel>Master</Channel><DesiredVolume>${level}</DesiredVolume>`);
+}
+
+async function setRoomMute(ip: string, muted: boolean): Promise<void> {
+  await upnpSoap(ip, "SetMute", `<InstanceID>0</InstanceID><Channel>Master</Channel><DesiredMute>${muted ? "1" : "0"}</DesiredMute>`);
+}
+
+function getRoomIP(name: string): string | null {
+  if (!roomsCache || !Array.isArray(roomsCache.data)) return null;
+  return roomsCache.data.find((r: any) => r.name === name)?.ip ?? null;
+}
+
 async function getRooms(force = false) {
   if (!force && roomsCache && Date.now() - roomsCache.ts < 15000) return roomsCache.data;
   const rooms = await sonos("discover");
   if (!Array.isArray(rooms)) { roomsCache = { data: rooms, ts: Date.now() }; return rooms; }
 
-  // Enrich each room with volume/mute from status (use --ip to avoid space-in-name split bug)
+  // Enrich each room with per-device volume/mute via direct UPnP (CLI routes grouped rooms through coordinator)
   const enriched = await Promise.all(
     rooms.map(async (r: any) => {
       try {
-        const s = await sonos(`--ip ${r.ip} status`);
-        return { ...r, volume: s.volume ?? 0, muted: s.mute === true };
+        const [volume, muted] = await Promise.all([getRoomVolume(r.ip), getRoomMute(r.ip)]);
+        return { ...r, volume, muted };
       } catch {
         return r;
       }
@@ -203,11 +241,30 @@ const server = serve({
 
           if (path === "/api/volume") {
             const level = Math.min(100, Math.max(0, Number(b.level ?? 30)));
+            const ip = getRoomIP(room);
+            if (ip) {
+              await setRoomVolume(ip, level);
+              // Patch cache so next read reflects the change immediately
+              if (roomsCache && Array.isArray(roomsCache.data)) {
+                const r = roomsCache.data.find((r: any) => r.name === room);
+                if (r) r.volume = level;
+              }
+              return json({ ok: true });
+            }
             return json(await sonos(`volume set --name "${room}" ${level}`));
           }
           if (path === "/api/mute") {
-            const state = b.state === true || b.state === "on" ? "on" : "off";
-            return json(await sonos(`mute ${state} --name "${room}"`));
+            const muted = b.state === true || b.state === "on";
+            const ip = getRoomIP(room);
+            if (ip) {
+              await setRoomMute(ip, muted);
+              if (roomsCache && Array.isArray(roomsCache.data)) {
+                const r = roomsCache.data.find((r: any) => r.name === room);
+                if (r) r.muted = muted;
+              }
+              return json({ ok: true });
+            }
+            return json(await sonos(`mute ${muted ? "on" : "off"} --name "${room}"`));
           }
 
           if (path === "/api/group/party") return json(await sonos('group party --to "Controller"'));
