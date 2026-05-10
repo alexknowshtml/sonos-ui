@@ -1,7 +1,12 @@
 #!/bin/bash
 set -e
 
-MAC="indyhall@100.88.157.74"
+# Set DEPLOY_HOST to user@host of your Mac running the Sonos UI service
+MAC="${DEPLOY_HOST:-}"
+if [ -z "$MAC" ]; then
+  echo "Error: DEPLOY_HOST is not set. Export it before running: export DEPLOY_HOST=user@your-mac"
+  exit 1
+fi
 REMOTE_DIR="~/Sites/sonos-ui"
 
 echo "Building..."
@@ -28,4 +33,4 @@ ssh "$MAC" "cd $REMOTE_DIR && ~/.bun/bin/bun install --production 2>/dev/null ||
 echo "Restarting launchd service..."
 ssh "$MAC" "launchctl unload ~/Library/LaunchAgents/com.indyhall.sonos-ui.plist 2>/dev/null || true && launchctl load ~/Library/LaunchAgents/com.indyhall.sonos-ui.plist"
 
-echo "Done. Access at http://sonos.indyhall.org:2650"
+echo "Done. Access at http://$(echo $MAC | cut -d@ -f2):2650"

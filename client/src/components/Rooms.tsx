@@ -11,7 +11,6 @@ interface Props {
   onDissolve: () => void;
   onJoin: (room: string, to: string) => void;
   onUnjoin: (room: string) => void;
-  onSolo: (room: string) => void;
 }
 
 function sliderFill(val: number) {
@@ -20,7 +19,7 @@ function sliderFill(val: number) {
 
 export default function Rooms({
   rooms, activeRoom, onSetRoom,
-  onVolume, onMute, onParty, onDissolve, onJoin, onUnjoin, onSolo,
+  onVolume, onMute, onParty, onDissolve, onJoin, onUnjoin,
 }: Props) {
   const [dissolvePending, setDissolvePending] = useState(false);
   const dissolveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -101,7 +100,6 @@ export default function Rooms({
             onSelect={() => onSetRoom(coordinator.name)}
             onVolume={(v) => onVolume(coordinator.name, v)}
             onMute={(m) => onMute(coordinator.name, m)}
-            onSolo={() => onSolo(coordinator.name)}
             onUnjoin={() => onUnjoin(coordinator.name)}
             otherCoordinators={[]}
             onJoin={(to) => onJoin(coordinator.name, to)}
@@ -123,7 +121,6 @@ export default function Rooms({
                 onSelect={() => onSetRoom(room.name)}
                 onVolume={(v) => onVolume(room.name, v)}
                 onMute={(m) => onMute(room.name, m)}
-                onSolo={() => onSolo(room.name)}
                 onUnjoin={() => onUnjoin(room.name)}
                 otherCoordinators={rooms.filter((r) => r.coordinator && r.name !== room.name)}
                 onJoin={(to) => onJoin(room.name, to)}
@@ -175,7 +172,7 @@ function ActionBtn({ children, onClick, bg, icon }: { children: React.ReactNode;
   );
 }
 
-function RoomCard({ room, isCoordinator, allInOneGroup, active, onSelect, onVolume, onMute, onSolo, onUnjoin, otherCoordinators, onJoin }: {
+function RoomCard({ room, isCoordinator, allInOneGroup, active, onSelect, onVolume, onMute, onUnjoin, otherCoordinators, onJoin }: {
   room: Room;
   isCoordinator?: boolean;
   allInOneGroup: boolean;
@@ -183,7 +180,6 @@ function RoomCard({ room, isCoordinator, allInOneGroup, active, onSelect, onVolu
   onSelect: () => void;
   onVolume: (v: number) => void;
   onMute: (m: boolean) => void;
-  onSolo: () => void;
   onUnjoin: () => void;
   otherCoordinators: Room[];
   onJoin: (to: string) => void;
@@ -265,7 +261,6 @@ function RoomCard({ room, isCoordinator, allInOneGroup, active, onSelect, onVolu
 
       {/* Actions — simplified when all grouped */}
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-        <SmallBtn onClick={onSolo}>🎯 Solo</SmallBtn>
         <SmallBtn onClick={onUnjoin}>↩ Unjoin</SmallBtn>
         {!allInOneGroup && otherCoordinators.map((r) => (
           <SmallBtn key={r.name} onClick={() => onJoin(r.name)}>→ Join {r.name}</SmallBtn>

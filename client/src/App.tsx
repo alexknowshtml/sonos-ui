@@ -123,7 +123,6 @@ export default function App() {
             onDissolve={s.dissolve}
             onJoin={s.joinGroup}
             onUnjoin={s.unjoin}
-            onSolo={s.solo}
           />
         )}
         {tab === "favs" && (
