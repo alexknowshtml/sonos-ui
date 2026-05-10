@@ -107,8 +107,14 @@ export function useSonos() {
   const pause = (room = activeRoom) => post("/pause", { room });
   const next = (room = activeRoom) => post("/next", { room });
   const prev = (room = activeRoom) => post("/prev", { room });
-  const setVolume = (room: string, level: number) => post("/volume", { room, level });
-  const setMute = (room: string, state: boolean) => post("/mute", { room, state });
+  const setVolume = (room: string, level: number) => {
+    setRooms((prev) => prev.map((r) => r.name === room ? { ...r, volume: level } : r));
+    return post("/volume", { room, level });
+  };
+  const setMute = (room: string, state: boolean) => {
+    setRooms((prev) => prev.map((r) => r.name === room ? { ...r, muted: state } : r));
+    return post("/mute", { room, state });
+  };
   const party = () => post("/group/party").then(() => refreshRooms(true));
   const dissolve = (room = activeRoom) => post("/group/dissolve", { room }).then(() => refreshRooms(true));
   const joinGroup = (room: string, to: string) => post("/group/join", { room, to }).then(() => refreshRooms(true));
