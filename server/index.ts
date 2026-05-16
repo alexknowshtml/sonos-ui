@@ -1,17 +1,16 @@
 import { serve, file } from "bun";
 import { join } from "path";
 import { networkInterfaces } from "os";
+import {
+  initUpnp, subscribeToRoom, handleNotify,
+  getRoomVolume, getRoomMute, setRoomVolume, setRoomMute,
+} from "./upnp";
 
 const SONOS = `${process.env.HOME}/bin/sonos`;
 const PORT = 2650;
 const PUBLIC = join(import.meta.dir, "public");
 
-// SSE clients watching for real-time events
 const sseClients = new Set<ReadableStreamDefaultController>();
-
-// UPnP GENA subscriptions: SID → room IP
-const subscriptions = new Map<string, string>();
-const subscribedIPs = new Set<string>();
 
 function getLocalIP(): string {
   const nets = networkInterfaces();
@@ -24,6 +23,18 @@ function getLocalIP(): string {
 }
 
 const LOCAL_IP = getLocalIP();
+
+function broadcast(data: object) {
+  const msg = new TextEncoder().encode(`data: ${JSON.stringify(data)}\n\n`);
+  for (const ctrl of sseClients) {
+    try { ctrl.enqueue(msg); } catch { sseClients.delete(ctrl); }
+  }
+}
+
+let roomsCache: { data: any; ts: number } | null = null;
+let favCache: { data: any; ts: number } | null = null;
+
+initUpnp(PORT, LOCAL_IP, broadcast, () => roomsCache);
 
 function parseArgs(args: string): string[] {
   const result: string[] = [];
@@ -39,20 +50,14 @@ function parseArgs(args: string): string[] {
 }
 
 async function sonos(args: string): Promise<any> {
-  const proc = Bun.spawn([SONOS, ...parseArgs(args), "--format", "json"], {
-    stdout: "pipe",
-    stderr: "pipe",
-  });
+  const proc = Bun.spawn([SONOS, ...parseArgs(args), "--format", "json"], { stdout: "pipe", stderr: "pipe" });
   const text = await new Response(proc.stdout).text();
   await proc.exited;
   try { return JSON.parse(text); } catch { return { raw: text.trim() }; }
 }
 
 async function sonosPlain(args: string): Promise<string> {
-  const proc = Bun.spawn([SONOS, ...parseArgs(args)], {
-    stdout: "pipe",
-    stderr: "pipe",
-  });
+  const proc = Bun.spawn([SONOS, ...parseArgs(args)], { stdout: "pipe", stderr: "pipe" });
   const text = await new Response(proc.stdout).text();
   await proc.exited;
   return text.trim();
@@ -65,133 +70,8 @@ function json(data: any, status = 200) {
   });
 }
 
-function err(msg: string, status = 500) {
-  return json({ error: msg }, status);
-}
-
-async function body(req: Request): Promise<any> {
-  try { return await req.json(); } catch { return {}; }
-}
-
-function broadcast(data: object) {
-  const msg = new TextEncoder().encode(`data: ${JSON.stringify(data)}\n\n`);
-  for (const ctrl of sseClients) {
-    try { ctrl.enqueue(msg); } catch { sseClients.delete(ctrl); }
-  }
-}
-
-// Start persistent sonos watch process and broadcast to SSE clients
-function startEventStream() {
-  const proc = Bun.spawn([SONOS, "watch", "--name", "Controller", "--format", "json"], {
-    stdout: "pipe",
-    stderr: "pipe",
-  });
-
-  async function pump() {
-    const reader = proc.stdout.getReader();
-    const decoder = new TextDecoder();
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      for (const line of decoder.decode(value).split("\n")) {
-        if (!line.trim()) continue;
-        const msg = new TextEncoder().encode(`data: ${line}\n\n`);
-        for (const ctrl of sseClients) {
-          try { ctrl.enqueue(msg); } catch { sseClients.delete(ctrl); }
-        }
-      }
-    }
-    setTimeout(startEventStream, 3000);
-  }
-  pump().catch(() => setTimeout(startEventStream, 3000));
-}
-
-// UPnP GENA: subscribe to a speaker's RenderingControl events
-async function subscribeToRoom(ip: string): Promise<void> {
-  if (subscribedIPs.has(ip)) return;
-  try {
-    const res = await fetch(`http://${ip}:1400/MediaRenderer/RenderingControl/Event`, {
-      method: "SUBSCRIBE",
-      headers: {
-        CALLBACK: `<http://${LOCAL_IP}:${PORT}/upnp/notify/${ip}>`,
-        NT: "upnp:event",
-        TIMEOUT: "Second-1800",
-      },
-      signal: AbortSignal.timeout(4000),
-    });
-    const sid = res.headers.get("SID");
-    if (sid) {
-      subscriptions.set(sid, ip);
-      subscribedIPs.add(ip);
-      setTimeout(() => renewSubscription(ip, sid), 1700 * 1000);
-    }
-  } catch { /* speaker offline or unreachable */ }
-}
-
-async function renewSubscription(ip: string, sid: string): Promise<void> {
-  try {
-    await fetch(`http://${ip}:1400/MediaRenderer/RenderingControl/Event`, {
-      method: "SUBSCRIBE",
-      headers: { SID: sid, TIMEOUT: "Second-1800" },
-      signal: AbortSignal.timeout(4000),
-    });
-    setTimeout(() => renewSubscription(ip, sid), 1700 * 1000);
-  } catch {
-    // Re-subscribe fresh on failure
-    subscribedIPs.delete(ip);
-    subscriptions.delete(sid);
-    setTimeout(() => subscribeToRoom(ip), 5000);
-  }
-}
-
-function parseLastChange(xmlBody: string): { volume?: number; mute?: boolean } {
-  const lcMatch = xmlBody.match(/<LastChange>([\s\S]*?)<\/LastChange>/);
-  if (!lcMatch) return {};
-  const lc = lcMatch[1].replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&");
-  const volMatch = lc.match(/<Volume[^>]+channel="Master"[^>]+val="(\d+)"/);
-  const muteMatch = lc.match(/<Mute[^>]+channel="Master"[^>]+val="([01])"/);
-  return {
-    volume: volMatch ? parseInt(volMatch[1]) : undefined,
-    mute: muteMatch ? muteMatch[1] === "1" : undefined,
-  };
-}
-
-// Cache rooms and favorites
-let roomsCache: { data: any; ts: number } | null = null;
-let favCache: { data: any; ts: number } | null = null;
-
-// Direct UPnP RenderingControl
-function upnpSoap(ip: string, action: string, args: string) {
-  return fetch(`http://${ip}:1400/MediaRenderer/RenderingControl/Control`, {
-    method: "POST",
-    headers: {
-      "Content-Type": 'text/xml; charset="utf-8"',
-      SOAPAction: `"urn:schemas-upnp-org:service:RenderingControl:1#${action}"`,
-    },
-    body: `<?xml version="1.0"?><s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/"><s:Body><u:${action} xmlns:u="urn:schemas-upnp-org:service:RenderingControl:1">${args}</u:${action}></s:Body></s:Envelope>`,
-    signal: AbortSignal.timeout(3000),
-  }).then((r) => r.text());
-}
-
-async function getRoomVolume(ip: string): Promise<number> {
-  const xml = await upnpSoap(ip, "GetVolume", "<InstanceID>0</InstanceID><Channel>Master</Channel>");
-  const m = xml.match(/<CurrentVolume>(\d+)<\/CurrentVolume>/);
-  return m ? parseInt(m[1]) : 0;
-}
-
-async function getRoomMute(ip: string): Promise<boolean> {
-  const xml = await upnpSoap(ip, "GetMute", "<InstanceID>0</InstanceID><Channel>Master</Channel>");
-  const m = xml.match(/<CurrentMute>([01])<\/CurrentMute>/);
-  return m ? m[1] === "1" : false;
-}
-
-async function setRoomVolume(ip: string, level: number): Promise<void> {
-  await upnpSoap(ip, "SetVolume", `<InstanceID>0</InstanceID><Channel>Master</Channel><DesiredVolume>${level}</DesiredVolume>`);
-}
-
-async function setRoomMute(ip: string, muted: boolean): Promise<void> {
-  await upnpSoap(ip, "SetMute", `<InstanceID>0</InstanceID><Channel>Master</Channel><DesiredMute>${muted ? "1" : "0"}</DesiredMute>`);
-}
+function err(msg: string, status = 500) { return json({ error: msg }, status); }
+async function body(req: Request): Promise<any> { try { return await req.json(); } catch { return {}; } }
 
 function getRoomIP(name: string): string | null {
   if (!roomsCache || !Array.isArray(roomsCache.data)) return null;
@@ -212,12 +92,7 @@ async function getRooms(force = false) {
     })
   );
   roomsCache = { data: enriched, ts: Date.now() };
-
-  // Subscribe to UPnP events for each new room
-  for (const r of enriched) {
-    if (r.ip) subscribeToRoom(r.ip).catch(() => {});
-  }
-
+  for (const r of enriched) if (r.ip) subscribeToRoom(r.ip).catch(() => {});
   return enriched;
 }
 
@@ -228,6 +103,25 @@ async function getFavs(force = false) {
   return data;
 }
 
+function startEventStream() {
+  const proc = Bun.spawn([SONOS, "watch", "--name", "Controller", "--format", "json"], { stdout: "pipe", stderr: "pipe" });
+  async function pump() {
+    const reader = proc.stdout.getReader();
+    const decoder = new TextDecoder();
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      for (const line of decoder.decode(value).split("\n")) {
+        if (line.trim()) broadcast(JSON.parse(line));
+      }
+    }
+    setTimeout(startEventStream, 3000);
+  }
+  pump().catch(() => setTimeout(startEventStream, 3000));
+}
+
+startEventStream();
+
 async function serveStatic(path: string): Promise<Response> {
   const filePath = path === "/" ? join(PUBLIC, "index.html") : join(PUBLIC, path);
   const f = file(filePath);
@@ -235,9 +129,7 @@ async function serveStatic(path: string): Promise<Response> {
   return new Response(file(join(PUBLIC, "index.html")));
 }
 
-startEventStream();
-
-const server = serve({
+serve({
   port: PORT,
   async fetch(req) {
     const url = new URL(req.url);
@@ -247,53 +139,26 @@ const server = serve({
       return new Response(null, { headers: { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Methods": "*", "Access-Control-Allow-Headers": "*" } });
     }
 
-    // UPnP GENA notify callback
     if (path.startsWith("/upnp/notify/") && req.method === "NOTIFY") {
-      const ip = path.replace("/upnp/notify/", "");
-      const xmlBody = await req.text();
-      const { volume, mute } = parseLastChange(xmlBody);
-      if ((volume !== undefined || mute !== undefined) && roomsCache && Array.isArray(roomsCache.data)) {
-        const room = roomsCache.data.find((r: any) => r.ip === ip);
-        if (room) {
-          if (volume !== undefined) room.volume = volume;
-          if (mute !== undefined) room.muted = mute;
-          broadcast({ type: "volume", room: room.name, volume, mute });
-        }
-      }
+      handleNotify(path.replace("/upnp/notify/", ""), await req.text());
       return new Response(null, { status: 200 });
     }
 
-    // SSE
     if (path === "/api/events") {
       let ctrl: ReadableStreamDefaultController;
       const stream = new ReadableStream({
-        start(c) {
-          ctrl = c;
-          sseClients.add(ctrl);
-          ctrl.enqueue(new TextEncoder().encode(": connected\n\n"));
-        },
+        start(c) { ctrl = c; sseClients.add(ctrl); ctrl.enqueue(new TextEncoder().encode(": connected\n\n")); },
         cancel() { sseClients.delete(ctrl); },
       });
-      return new Response(stream, {
-        headers: {
-          "Content-Type": "text/event-stream",
-          "Cache-Control": "no-cache",
-          Connection: "keep-alive",
-          "Access-Control-Allow-Origin": "*",
-        },
-      });
+      return new Response(stream, { headers: { "Content-Type": "text/event-stream", "Cache-Control": "no-cache", Connection: "keep-alive", "Access-Control-Allow-Origin": "*" } });
     }
 
-    // Album art proxy — avoids CORS on Sonos image URLs
     if (path === "/api/art" && req.method === "GET") {
       const artUrl = url.searchParams.get("url");
       if (!artUrl) return err("Missing url param", 400);
       try {
         const res = await fetch(artUrl, { signal: AbortSignal.timeout(5000) });
-        const ct = res.headers.get("content-type") ?? "image/jpeg";
-        return new Response(res.body, {
-          headers: { "Content-Type": ct, "Cache-Control": "public, max-age=3600", "Access-Control-Allow-Origin": "*" },
-        });
+        return new Response(res.body, { headers: { "Content-Type": res.headers.get("content-type") ?? "image/jpeg", "Cache-Control": "public, max-age=3600", "Access-Control-Allow-Origin": "*" } });
       } catch { return err("Art fetch failed"); }
     }
 
@@ -308,14 +173,10 @@ const server = serve({
           if (path === "/api/queue") {
             const room = url.searchParams.get("room") || "Controller";
             const data = await sonos(`queue --name "${room}"`);
-            const tracks = Array.isArray(data) ? data : (data?.queue ?? data?.tracks ?? []);
-            return json(tracks);
+            return json(Array.isArray(data) ? data : (data?.queue ?? data?.tracks ?? []));
           }
           if (path === "/api/state") {
-            const [rooms, status] = await Promise.all([
-              getRooms(),
-              sonos("status --name Controller").catch(() => ({})),
-            ]);
+            const [rooms, status] = await Promise.all([getRooms(), sonos("status --name Controller").catch(() => ({}))]);
             return json({ rooms, status });
           }
         }
@@ -358,7 +219,6 @@ const server = serve({
             return json(await sonos(`mute ${muted ? "on" : "off"} --name "${room}"`));
           }
 
-          // Set all rooms in a group proportionally
           if (path === "/api/group/volume") {
             const { groupId, level } = b;
             const target = Math.min(100, Math.max(0, Number(level ?? 30)));
@@ -367,9 +227,7 @@ const server = serve({
             if (!grouped.length) return err("Group not found", 404);
             const maxVol = Math.max(...grouped.map((r: any) => r.volume ?? 0));
             await Promise.all(grouped.map(async (r: any) => {
-              const newVol = maxVol > 0
-                ? Math.round(target * ((r.volume ?? 0) / maxVol))
-                : target;
+              const newVol = maxVol > 0 ? Math.round(target * ((r.volume ?? 0) / maxVol)) : target;
               await setRoomVolume(r.ip, newVol).catch(() => {});
               r.volume = newVol;
             }));
@@ -388,9 +246,7 @@ const server = serve({
         }
 
         return err("Not found", 404);
-      } catch (e: any) {
-        return err(e.message ?? "Command failed");
-      }
+      } catch (e: any) { return err(e.message ?? "Command failed"); }
     }
 
     return serveStatic(path);
