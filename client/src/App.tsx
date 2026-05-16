@@ -1,14 +1,20 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useSonos } from "./hooks/useSonos";
 import NowPlaying from "./components/NowPlaying";
 import Rooms from "./components/Rooms";
 import Favorites from "./components/Favorites";
+import Queue from "./components/Queue";
 
-type Tab = "now" | "rooms" | "favs";
+type Tab = "now" | "rooms" | "favs" | "queue";
 
 export default function App() {
   const [tab, setTab] = useState<Tab>("now");
   const s = useSonos();
+
+  // Load queue when switching to the queue tab
+  useEffect(() => {
+    if (tab === "queue") s.fetchQueue();
+  }, [tab, s.activeRoom]);
 
   if (s.loading) {
     return (
@@ -119,6 +125,7 @@ export default function App() {
             onSetRoom={s.setActiveRoom}
             onVolume={s.setVolume}
             onMute={s.setMute}
+            onGroupVolume={s.setGroupVolume}
             onParty={s.party}
             onDissolve={s.dissolve}
             onJoin={s.joinGroup}
@@ -134,6 +141,14 @@ export default function App() {
             onScene={s.applyScene}
           />
         )}
+        {tab === "queue" && (
+          <Queue
+            queue={s.queue}
+            activeRoom={s.activeRoom}
+            nowPlayingTitle={s.nowPlaying.title}
+            onRefresh={() => s.fetchQueue()}
+          />
+        )}
       </main>
 
       {/* Tab bar */}
@@ -146,6 +161,7 @@ export default function App() {
         {([
           ["now", "🎵", "Now Playing"],
           ["rooms", "🔊", "Rooms"],
+          ["queue", "📋", "Queue"],
           ["favs", "⭐", "Favorites"],
         ] as [Tab, string, string][]).map(([id, icon, label]) => (
           <button

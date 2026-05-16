@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback } from "react";
 
 export interface Room {
   name: string;
@@ -19,6 +19,15 @@ export interface NowPlaying {
   room?: string;
 }
 
+export interface QueueTrack {
+  title?: string;
+  artist?: string;
+  album?: string;
+  albumArt?: string;
+  uri?: string;
+  duration?: number;
+}
+
 const API = "/api";
 
 async function post(path: string, body: any = {}) {
@@ -35,6 +44,7 @@ export function useSonos() {
   const [nowPlaying, setNowPlaying] = useState<NowPlaying>({});
   const [favorites, setFavorites] = useState<any[]>([]);
   const [scenes, setScenes] = useState<string[]>([]);
+  const [queue, setQueue] = useState<QueueTrack[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeRoom, setActiveRoom] = useState("Controller");
 
@@ -81,6 +91,14 @@ export function useSonos() {
     else if (data?.scenes) setScenes(data.scenes);
   }, []);
 
+  const fetchQueue = useCallback(async (room?: string) => {
+    const r = room ?? activeRoom;
+    try {
+      const data = await fetch(`${API}/queue?room=${encodeURIComponent(r)}`).then((res) => res.json());
+      setQueue(Array.isArray(data) ? data : []);
+    } catch { setQueue([]); }
+  }, [activeRoom]);
+
   useEffect(() => {
     Promise.all([refreshRooms(), refreshNowPlaying(), refreshFavs(), refreshScenes()])
       .finally(() => setLoading(false));
@@ -92,10 +110,16 @@ export function useSonos() {
     es.onmessage = (e) => {
       try {
         const data = JSON.parse(e.data);
-        if (data.type === "transport" || data.state) {
+        if (data.type === "volume") {
+          // Direct volume patch from UPnP GENA push
+          setRooms((prev) => prev.map((r) =>
+            r.name === data.room
+              ? { ...r, ...(data.volume !== undefined ? { volume: data.volume } : {}), ...(data.mute !== undefined ? { muted: data.mute } : {}) }
+              : r
+          ));
+        } else if (data.type === "transport" || data.state) {
           refreshNowPlaying();
-        }
-        if (data.type === "group" || data.volume !== undefined) {
+        } else if (data.type === "group" || data.volume !== undefined) {
           refreshRooms();
         }
       } catch {}
@@ -103,18 +127,31 @@ export function useSonos() {
     return () => es.close();
   }, []);
 
-  const play = (room = activeRoom) => post("/play", { room });
-  const pause = (room = activeRoom) => post("/pause", { room });
-  const next = (room = activeRoom) => post("/next", { room });
-  const prev = (room = activeRoom) => post("/prev", { room });
   const setVolume = (room: string, level: number) => {
     setRooms((prev) => prev.map((r) => r.name === room ? { ...r, volume: level } : r));
     return post("/volume", { room, level });
   };
+
   const setMute = (room: string, state: boolean) => {
     setRooms((prev) => prev.map((r) => r.name === room ? { ...r, muted: state } : r));
     return post("/mute", { room, state });
   };
+
+  const setGroupVolume = (groupId: string, level: number) => {
+    setRooms((prev) => prev.map((r) => {
+      if (r.groupId !== groupId) return r;
+      const groupRooms = prev.filter((x) => x.groupId === groupId);
+      const maxVol = Math.max(...groupRooms.map((x) => x.volume ?? 0));
+      const newVol = maxVol > 0 ? Math.round(level * ((r.volume ?? 0) / maxVol)) : level;
+      return { ...r, volume: Math.min(100, Math.max(0, newVol)) };
+    }));
+    return post("/group/volume", { groupId, level });
+  };
+
+  const play = (room = activeRoom) => post("/play", { room });
+  const pause = (room = activeRoom) => post("/pause", { room });
+  const next = (room = activeRoom) => post("/next", { room });
+  const prev = (room = activeRoom) => post("/prev", { room });
   const party = () => post("/group/party").then(() => refreshRooms(true));
   const dissolve = (room = activeRoom) => post("/group/dissolve", { room }).then(() => refreshRooms(true));
   const joinGroup = (room: string, to: string) => post("/group/join", { room, to }).then(() => refreshRooms(true));
@@ -124,10 +161,10 @@ export function useSonos() {
   const applyScene = (name: string) => post("/scenes/apply", { name }).then(() => refreshRooms(true));
 
   return {
-    rooms, nowPlaying, favorites, scenes, loading, activeRoom, setActiveRoom,
-    play, pause, next, prev, setVolume, setMute,
+    rooms, nowPlaying, favorites, scenes, queue, loading, activeRoom, setActiveRoom,
+    play, pause, next, prev, setVolume, setMute, setGroupVolume,
     party, dissolve, joinGroup, unjoin, solo,
-    openFavorite, applyScene,
+    openFavorite, applyScene, fetchQueue,
     refresh: () => { refreshRooms(true); refreshNowPlaying(); },
   };
 }

@@ -36,7 +36,7 @@ export default function NowPlaying({
         position: "relative",
       }}>
         {nowPlaying.albumArt ? (
-          <img src={nowPlaying.albumArt} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+          <img src={`/api/art?url=${encodeURIComponent(nowPlaying.albumArt)}`} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
         ) : (
           <div style={{
             width: "70%",
