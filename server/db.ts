@@ -116,11 +116,14 @@ export function upsertNowPlaying(data: any): void {
   // sonos watch events: data.currentTrack + data.albumArt + data.playbackState
   const track = data.nowPlaying ?? data.currentTrack ?? {};
   const pos = data.position;
+  const positionSec = pos ? parseTimecode(pos.RelTime) : null;
+  const durationSec = pos ? parseTimecode(pos.TrackDuration) : null;
   db.query(`
     UPDATE now_playing SET
       title = $title, artist = $artist, album = $album,
       album_art = $albumArt, state = $state,
-      position_sec = $positionSec, duration_sec = $durationSec,
+      position_sec = COALESCE($positionSec, position_sec),
+      duration_sec = COALESCE($durationSec, duration_sec),
       updated_at = unixepoch()
     WHERE id = 1
   `).run({
@@ -129,8 +132,8 @@ export function upsertNowPlaying(data: any): void {
     $album: track.album ?? data.album ?? null,
     $albumArt: data.albumArtURL ?? track.albumArtURI ?? track.albumArt ?? data.albumArt ?? null,
     $state: data.transport?.State ?? data.playbackState ?? data.state ?? "STOPPED",
-    $positionSec: pos ? parseTimecode(pos.RelTime) : null,
-    $durationSec: pos ? parseTimecode(pos.TrackDuration) : null,
+    $positionSec: positionSec,
+    $durationSec: durationSec,
   });
 }
 

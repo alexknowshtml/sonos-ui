@@ -84,7 +84,7 @@ export function useSonos() {
       if (data.status) {
         setNowPlaying(data.status);
         nowPlayingRef.current = data.status;
-        if (data.status.positionSec !== undefined) {
+        if (data.status.positionSec !== undefined && data.status.positionSec > 0) {
           livePositionRef.current = data.status.positionSec;
           setLivePosition(data.status.positionSec);
         }
