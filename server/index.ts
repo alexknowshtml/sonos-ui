@@ -11,11 +11,15 @@ import {
   getFavoritesFromDB, upsertFavorites,
   getQueueFromDB, upsertQueue,
   updateRoomVolume as dbUpdateRoomVolume,
+  getKV, setKV,
 } from "./db";
 
 const SONOS = `${process.env.HOME}/bin/sonos`;
 const YT_DLP = `${process.env.HOME}/bin/yt-dlp`;
 const YT_API_KEY = process.env.GOOGLE_API_KEY ?? "";
+const YT_CLIENT_ID = process.env.YT_CLIENT_ID ?? "";
+const YT_CLIENT_SECRET = process.env.YT_CLIENT_SECRET ?? "";
+const YT_REDIRECT_URI = `http://100.88.157.74:${2650}/api/yt/callback`;
 const PORT = 2650;
 
 const ytUrlCache = new Map<string, { url: string; expires: number }>();
@@ -71,6 +75,41 @@ async function resolveYtUrl(videoId: string): Promise<string | null> {
   }
   return null;
 }
+async function getYtAccessToken(): Promise<string | null> {
+  const tokenJson = getKV("yt_tokens");
+  if (!tokenJson) return null;
+  const tokens = JSON.parse(tokenJson);
+  if (Date.now() < tokens.expires_at - 60_000) return tokens.access_token;
+  // Refresh
+  const res = await fetch("https://oauth2.googleapis.com/token", {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      client_id: YT_CLIENT_ID,
+      client_secret: YT_CLIENT_SECRET,
+      refresh_token: tokens.refresh_token,
+      grant_type: "refresh_token",
+    }),
+  });
+  if (!res.ok) return null;
+  const data: any = await res.json();
+  tokens.access_token = data.access_token;
+  tokens.expires_at = Date.now() + data.expires_in * 1000;
+  setKV("yt_tokens", JSON.stringify(tokens));
+  return tokens.access_token;
+}
+
+async function ytApiGet(endpoint: string): Promise<any> {
+  const token = await getYtAccessToken();
+  if (!token) throw new Error("not_authorized");
+  const res = await fetch(`https://www.googleapis.com/youtube/v3/${endpoint}`, {
+    headers: { Authorization: `Bearer ${token}` },
+    signal: AbortSignal.timeout(10_000),
+  });
+  if (!res.ok) throw new Error(`YouTube API error ${res.status}`);
+  return res.json();
+}
+
 const PUBLIC = join(import.meta.dir, "public");
 
 const sseClients = new Set<ReadableStreamDefaultController>();
@@ -389,6 +428,97 @@ serve({
               }
             }
             return json(items);
+          }
+
+          if (path === "/api/yt/auth") {
+            if (!YT_CLIENT_ID) return err("YT_CLIENT_ID not configured", 500);
+            const authUrl = new URL("https://accounts.google.com/o/oauth2/v2/auth");
+            authUrl.searchParams.set("client_id", YT_CLIENT_ID);
+            authUrl.searchParams.set("redirect_uri", YT_REDIRECT_URI);
+            authUrl.searchParams.set("response_type", "code");
+            authUrl.searchParams.set("scope", "https://www.googleapis.com/auth/youtube.readonly");
+            authUrl.searchParams.set("access_type", "offline");
+            authUrl.searchParams.set("prompt", "consent");
+            return Response.redirect(authUrl.toString(), 302);
+          }
+
+          if (path === "/api/yt/callback") {
+            const code = url.searchParams.get("code");
+            if (!code) return err("Missing code", 400);
+            const res = await fetch("https://oauth2.googleapis.com/token", {
+              method: "POST",
+              headers: { "Content-Type": "application/x-www-form-urlencoded" },
+              body: new URLSearchParams({
+                code,
+                client_id: YT_CLIENT_ID,
+                client_secret: YT_CLIENT_SECRET,
+                redirect_uri: YT_REDIRECT_URI,
+                grant_type: "authorization_code",
+              }),
+            });
+            if (!res.ok) return err("Token exchange failed", 500);
+            const data: any = await res.json();
+            setKV("yt_tokens", JSON.stringify({
+              access_token: data.access_token,
+              refresh_token: data.refresh_token,
+              expires_at: Date.now() + data.expires_in * 1000,
+            }));
+            return new Response(`<html><body><script>window.close()</script><p>Connected! You can close this tab.</p></body></html>`, {
+              headers: { "Content-Type": "text/html" },
+            });
+          }
+
+          if (path === "/api/yt/auth/status") {
+            const tokenJson = getKV("yt_tokens");
+            return json({ authorized: !!tokenJson });
+          }
+
+          if (path === "/api/yt/playlists") {
+            try {
+              const likedPlaylist = {
+                id: "LL",
+                title: "Liked Songs",
+                thumbnail: null,
+                itemCount: null,
+              };
+              const data = await ytApiGet("playlists?part=snippet,contentDetails&mine=true&maxResults=50");
+              const playlists = (data.items ?? []).map((item: any) => ({
+                id: item.id,
+                title: item.snippet?.title ?? "",
+                thumbnail: item.snippet?.thumbnails?.medium?.url ?? item.snippet?.thumbnails?.default?.url ?? null,
+                itemCount: item.contentDetails?.itemCount ?? null,
+              }));
+              return json([likedPlaylist, ...playlists]);
+            } catch (e: any) {
+              if (e.message === "not_authorized") return err("Not authorized", 401);
+              throw e;
+            }
+          }
+
+          if (path.startsWith("/api/yt/playlist/")) {
+            const playlistId = path.replace("/api/yt/playlist/", "");
+            if (!playlistId) return err("Missing playlist ID", 400);
+            try {
+              const pageToken = url.searchParams.get("pageToken") ?? "";
+              const ptParam = pageToken ? `&pageToken=${encodeURIComponent(pageToken)}` : "";
+              const data = await ytApiGet(`playlistItems?part=snippet&playlistId=${encodeURIComponent(playlistId)}&maxResults=50${ptParam}`);
+              const items = (data.items ?? [])
+                .map((item: any) => ({
+                  videoId: item.snippet?.resourceId?.videoId,
+                  title: item.snippet?.title ?? "",
+                  artist: item.snippet?.videoOwnerChannelTitle ?? "",
+                  thumbnail: item.snippet?.thumbnails?.medium?.url ?? item.snippet?.thumbnails?.default?.url ?? null,
+                }))
+                .filter((i: any) => i.videoId && i.title !== "Deleted video" && i.title !== "Private video");
+              // Pre-warm first result
+              if (items[0] && !ytUrlCache.has(items[0].videoId)) {
+                resolveYtUrl(items[0].videoId).catch(() => {});
+              }
+              return json({ items, nextPageToken: data.nextPageToken ?? null });
+            } catch (e: any) {
+              if (e.message === "not_authorized") return err("Not authorized", 401);
+              throw e;
+            }
           }
         }
 

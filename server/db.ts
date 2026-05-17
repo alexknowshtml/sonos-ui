@@ -7,6 +7,11 @@ db.exec("PRAGMA journal_mode = WAL");
 db.exec("PRAGMA synchronous = NORMAL");
 
 db.exec(`
+  CREATE TABLE IF NOT EXISTS kv (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL,
+    updated_at INTEGER NOT NULL DEFAULT (unixepoch())
+  );
   CREATE TABLE IF NOT EXISTS rooms (
     name TEXT PRIMARY KEY,
     ip TEXT NOT NULL,
@@ -54,6 +59,18 @@ db.exec(`INSERT OR IGNORE INTO now_playing (id, state) VALUES (1, 'STOPPED')`);
 try { db.exec("ALTER TABLE favorites ADD COLUMN source TEXT"); } catch {}
 try { db.exec("ALTER TABLE now_playing ADD COLUMN position_sec INTEGER"); } catch {}
 try { db.exec("ALTER TABLE now_playing ADD COLUMN duration_sec INTEGER"); } catch {}
+
+export function getKV(key: string): string | null {
+  const row = db.query("SELECT value FROM kv WHERE key = $key").get({ $key: key }) as any;
+  return row?.value ?? null;
+}
+
+export function setKV(key: string, value: string): void {
+  db.query(`
+    INSERT INTO kv (key, value, updated_at) VALUES ($key, $value, unixepoch())
+    ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = unixepoch()
+  `).run({ $key: key, $value: value });
+}
 
 export function getRoomsFromDB(): any[] {
   return db.query("SELECT name, ip, group_id as groupId, coordinator, volume, muted FROM rooms ORDER BY name").all();
