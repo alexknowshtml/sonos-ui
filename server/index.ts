@@ -99,7 +99,7 @@ async function getRooms(force = false) {
         } catch { return r; }
       })
     ),
-    sonos("groups").catch(() => null),
+    sonos("group status").catch(() => null),
   ]);
 
   // Merge groupId from live group data before DB write
