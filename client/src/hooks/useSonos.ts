@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 
 export interface Room {
   name: string;
@@ -46,6 +46,11 @@ export function useSonos() {
   const [queue, setQueue] = useState<QueueTrack[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeRoom, setActiveRoom] = useState("Controller");
+  const [commandPending, setCommandPending] = useState(false);
+
+  // Ref so poll-until-changed closure always reads latest state
+  const nowPlayingRef = useRef<NowPlaying>({});
+  const commandPendingRef = useRef(false);
 
   const applyGroupData = (rooms: Room[], groupData: any): Room[] => {
     if (!groupData?.groups) return rooms;
@@ -63,7 +68,6 @@ export function useSonos() {
     const roomData = await fetch(`${API}${path}`).then((r) => r.json());
     const rooms: Room[] = Array.isArray(roomData) ? roomData : roomData?.zones ?? [];
     setRooms(rooms);
-    // Fetch group membership in background — DB rooms already have groupId but this refreshes it
     fetch(`${API}/groups`).then((r) => r.json())
       .then((gd) => setRooms((prev) => applyGroupData(prev, gd)))
       .catch(() => {});
@@ -72,8 +76,13 @@ export function useSonos() {
   const refreshNowPlaying = useCallback(async () => {
     try {
       const data = await fetch(`${API}/state`).then((r) => r.json());
-      if (data.status) setNowPlaying(data.status);
+      if (data.status) {
+        setNowPlaying(data.status);
+        nowPlayingRef.current = data.status;
+        return data.status as NowPlaying;
+      }
     } catch {}
+    return null;
   }, []);
 
   const refreshFavs = useCallback(async () => {
@@ -95,20 +104,35 @@ export function useSonos() {
       .finally(() => setLoading(false));
   }, []);
 
+  // Background heartbeat — catches any SSE misses
+  useEffect(() => {
+    const id = setInterval(() => refreshNowPlaying(), 12000);
+    return () => clearInterval(id);
+  }, [refreshNowPlaying]);
+
+  // Refresh on tab focus — covers device wake / background
+  useEffect(() => {
+    const onVisible = () => {
+      if (document.visibilityState === "visible") refreshNowPlaying();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => document.removeEventListener("visibilitychange", onVisible);
+  }, [refreshNowPlaying]);
+
   // SSE for real-time updates
   useEffect(() => {
     const es = new EventSource(`${API}/events`);
+    es.onopen = () => refreshNowPlaying();
     es.onmessage = (e) => {
       try {
         const data = JSON.parse(e.data);
         if (data.type === "volume") {
-          // Direct volume patch from UPnP GENA push
           setRooms((prev) => prev.map((r) =>
             r.name === data.room
               ? { ...r, ...(data.volume !== undefined ? { volume: data.volume } : {}), ...(data.mute !== undefined ? { muted: data.mute } : {}) }
               : r
           ));
-        } else if (data.type === "transport" || data.state) {
+        } else if (data.type === "transport" || data.state || data.playbackState || data.currentTrack) {
           refreshNowPlaying();
         } else if (data.type === "group" || data.volume !== undefined) {
           refreshRooms();
@@ -117,6 +141,43 @@ export function useSonos() {
     };
     return () => es.close();
   }, []);
+
+  // Poll every 1.5s until state changes from snapshot, then clear pending
+  const pollUntilChanged = useCallback((snapshot: NowPlaying) => {
+    let attempts = 0;
+    const id = setInterval(async () => {
+      attempts++;
+      const fresh = await refreshNowPlaying();
+      if (!fresh) return;
+      const changed =
+        fresh.title !== snapshot.title ||
+        fresh.state !== snapshot.state;
+      if (changed || !commandPendingRef.current) {
+        clearInterval(id);
+        setCommandPending(false);
+        commandPendingRef.current = false;
+      }
+    }, 1500);
+  }, [refreshNowPlaying]);
+
+  const withPending = useCallback((fn: () => Promise<any>, waitForChange = false) => {
+    const snapshot = { ...nowPlayingRef.current };
+    setCommandPending(true);
+    commandPendingRef.current = true;
+    return fn()
+      .then(() => {
+        if (waitForChange) {
+          pollUntilChanged(snapshot);
+        } else {
+          setCommandPending(false);
+          commandPendingRef.current = false;
+        }
+      })
+      .catch(() => {
+        setCommandPending(false);
+        commandPendingRef.current = false;
+      });
+  }, [pollUntilChanged]);
 
   const setVolume = (room: string, level: number) => {
     setRooms((prev) => prev.map((r) => r.name === room ? { ...r, volume: level } : r));
@@ -139,19 +200,25 @@ export function useSonos() {
     return post("/group/volume", { groupId, level });
   };
 
-  const play = (room = activeRoom) => post("/play", { room });
-  const pause = (room = activeRoom) => post("/pause", { room });
-  const next = (room = activeRoom) => post("/next", { room });
-  const prev = (room = activeRoom) => post("/prev", { room });
+  const play = (room = activeRoom) => withPending(() => post("/play", { room }));
+  const pause = (room = activeRoom) => withPending(() => post("/pause", { room }));
+  const next = (room = activeRoom) => withPending(() => post("/next", { room }), true);
+  const prev = (room = activeRoom) => withPending(() => post("/prev", { room }), true);
   const party = () => post("/group/party").then(() => refreshRooms(true));
   const dissolve = (room = activeRoom) => post("/group/dissolve", { room }).then(() => refreshRooms(true));
   const joinGroup = (room: string, to: string) => post("/group/join", { room, to }).then(() => refreshRooms(true));
   const unjoin = (room: string) => post("/group/unjoin", { room }).then(() => refreshRooms(true));
   const solo = (room: string) => post("/group/solo", { room }).then(() => refreshRooms(true));
-  const openFavorite = (index: number, room = activeRoom) => post("/favorites/open", { room, index });
+  const openFavorite = (index: number, room = activeRoom) => {
+    const snapshot = { ...nowPlayingRef.current };
+    setCommandPending(true);
+    commandPendingRef.current = true;
+    return post("/favorites/open", { room, index }).then(() => pollUntilChanged(snapshot));
+  };
 
   return {
     rooms, nowPlaying, favorites, queue, loading, activeRoom, setActiveRoom,
+    commandPending,
     play, pause, next, prev, setVolume, setMute, setGroupVolume,
     party, dissolve, joinGroup, unjoin, solo,
     openFavorite, fetchQueue,
