@@ -71,6 +71,11 @@ const MiniPlayer = ({ s }: { s: ReturnType<typeof useSonos> }) => {
               </div>
               <span style={{ fontSize: 10, color: "rgba(255,250,245,0.5)", fontVariantNumeric: "tabular-nums", flexShrink: 0 }}>{fmtTime(dur)}</span>
             </div>
+          ) : pos !== undefined ? (
+            <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 2 }}>
+              <span style={{ fontSize: 10, color: "rgba(255,250,245,0.5)", fontVariantNumeric: "tabular-nums" }}>{fmtTime(pos)}</span>
+              {s.nowPlaying.artist && <span style={{ fontSize: 11, color: "rgba(255,250,245,0.5)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>· {s.nowPlaying.artist}</span>}
+            </div>
           ) : s.nowPlaying.artist ? (
             <div style={{ fontSize: 11, color: "rgba(255,250,245,0.6)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", marginTop: 2 }}>
               {s.nowPlaying.artist}
