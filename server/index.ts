@@ -39,6 +39,7 @@ function broadcast(data: object) {
 
 let roomsCache: { data: any; ts: number } | null = null;
 let favCache: { data: any; ts: number } | null = null;
+const queueCache = new Map<string, { data: any[]; ts: number }>();
 
 initUpnp(PORT, LOCAL_IP, broadcast, () => roomsCache);
 
@@ -214,6 +215,8 @@ serve({
           }
           if (path === "/api/queue") {
             const room = url.searchParams.get("room") || "Controller";
+            const cached = queueCache.get(room);
+            if (cached && Date.now() - cached.ts < 15_000) return json(cached.data);
             if (!roomsCache) await getRooms();
             const ip = getRoomIP(room);
             const data = await sonos(`queue list --name "${room}"`);
@@ -228,6 +231,7 @@ serve({
                 : rawArt || undefined;
               return { title: t.title, artist: t.artist, album: t.album, albumArt, uri: t.uri };
             });
+            queueCache.set(room, { data: tracks, ts: Date.now() });
             return json(tracks);
           }
           if (path === "/api/state") {
