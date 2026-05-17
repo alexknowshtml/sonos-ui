@@ -43,7 +43,6 @@ export function useSonos() {
   const [rooms, setRooms] = useState<Room[]>([]);
   const [nowPlaying, setNowPlaying] = useState<NowPlaying>({});
   const [favorites, setFavorites] = useState<any[]>([]);
-  const [scenes, setScenes] = useState<string[]>([]);
   const [queue, setQueue] = useState<QueueTrack[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeRoom, setActiveRoom] = useState("Controller");
@@ -85,12 +84,6 @@ export function useSonos() {
     else if (data?.favorites) setFavorites(data.favorites);
   }, []);
 
-  const refreshScenes = useCallback(async () => {
-    const data = await fetch(`${API}/scenes`).then((r) => r.json());
-    if (Array.isArray(data)) setScenes(data);
-    else if (data?.scenes) setScenes(data.scenes);
-  }, []);
-
   const fetchQueue = useCallback(async (room?: string) => {
     const r = room ?? activeRoom;
     try {
@@ -100,7 +93,7 @@ export function useSonos() {
   }, [activeRoom]);
 
   useEffect(() => {
-    Promise.all([refreshRooms(), refreshNowPlaying(), refreshFavs(), refreshScenes()])
+    Promise.all([refreshRooms(), refreshNowPlaying(), refreshFavs()])
       .finally(() => setLoading(false));
   }, []);
 
@@ -158,13 +151,12 @@ export function useSonos() {
   const unjoin = (room: string) => post("/group/unjoin", { room }).then(() => refreshRooms(true));
   const solo = (room: string) => post("/group/solo", { room }).then(() => refreshRooms(true));
   const openFavorite = (index: number, room = activeRoom) => post("/favorites/open", { room, index });
-  const applyScene = (name: string) => post("/scenes/apply", { name }).then(() => refreshRooms(true));
 
   return {
-    rooms, nowPlaying, favorites, scenes, queue, loading, activeRoom, setActiveRoom,
+    rooms, nowPlaying, favorites, queue, loading, activeRoom, setActiveRoom,
     play, pause, next, prev, setVolume, setMute, setGroupVolume,
     party, dissolve, joinGroup, unjoin, solo,
-    openFavorite, applyScene, fetchQueue,
+    openFavorite, fetchQueue,
     refresh: () => { refreshRooms(true); refreshNowPlaying(); },
   };
 }

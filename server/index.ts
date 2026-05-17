@@ -98,7 +98,12 @@ async function getRooms(force = false) {
 
 async function getFavs(force = false) {
   if (!force && favCache && Date.now() - favCache.ts < 60000) return favCache.data;
-  const data = await sonos("favorites list");
+  const raw = await sonos('favorites list --name "Controller"');
+  const items: any[] = Array.isArray(raw) ? raw : Array.isArray(raw?.items) ? raw.items : [];
+  const data = items.map((entry: any) => {
+    const f = entry.item ?? entry;
+    return { title: f.title, albumArt: f.albumArtURI || f.albumArt, position: entry.position };
+  });
   favCache = { data, ts: Date.now() };
   return data;
 }

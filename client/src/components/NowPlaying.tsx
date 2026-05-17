@@ -10,13 +10,15 @@ interface Props {
   onNext: () => void;
   onPrev: () => void;
   onVolume: (room: string, v: number) => void;
+  onOpenFavs: () => void;
 }
 
 export default function NowPlaying({
   nowPlaying, rooms, activeRoom, onSetRoom,
-  onPlay, onPause, onNext, onPrev, onVolume,
+  onPlay, onPause, onNext, onPrev, onVolume, onOpenFavs,
 }: Props) {
   const isPlaying = nowPlaying.state === "PLAYING";
+  const isIdle = !nowPlaying.title && !isPlaying;
   const room = rooms.find((r) => r.name === activeRoom);
   const vol = room?.volume ?? 30;
 
@@ -59,20 +61,49 @@ export default function NowPlaying({
       </div>
 
       {/* Track info card */}
-      <div style={{
-        background: "var(--warm-white)",
-        borderRadius: 16,
-        padding: 16,
-        border: "2px solid var(--cream-dark)",
-      }}>
-        <div style={{ fontSize: 20, fontWeight: 700, color: "var(--espresso)", letterSpacing: -0.3 }}>
-          {nowPlaying.title || "Nothing playing"}
+      {isIdle ? (
+        <div style={{
+          background: "var(--warm-white)",
+          borderRadius: 16,
+          padding: 20,
+          border: "2px solid var(--cream-dark)",
+          display: "flex",
+          flexDirection: "column",
+          alignItems: "center",
+          gap: 12,
+          textAlign: "center",
+        }}>
+          <div style={{ fontSize: 17, fontWeight: 600, color: "var(--walnut)" }}>Nothing playing</div>
+          <div style={{ fontSize: 14, color: "var(--sand)" }}>Pick something from Favorites to get started</div>
+          <button
+            onClick={onOpenFavs}
+            style={{
+              padding: "10px 24px",
+              borderRadius: 24,
+              background: "var(--label-teal)",
+              color: "var(--warm-white)",
+              fontWeight: 600,
+              fontSize: 14,
+              boxShadow: "0 2px 8px rgba(74,155,140,0.3)",
+            }}
+          >Open Favorites</button>
         </div>
-        <div style={{ color: "var(--walnut)", marginTop: 4, fontSize: 15 }}>
-          {nowPlaying.artist || "—"}
-          {nowPlaying.album ? ` · ${nowPlaying.album}` : ""}
+      ) : (
+        <div style={{
+          background: "var(--warm-white)",
+          borderRadius: 16,
+          padding: 16,
+          border: "2px solid var(--cream-dark)",
+        }}>
+          <div style={{ fontSize: 20, fontWeight: 700, color: "var(--espresso)", letterSpacing: -0.3 }}>
+            {nowPlaying.title}
+          </div>
+          <div style={{ color: "var(--walnut)", marginTop: 4, fontSize: 15 }}>
+            {nowPlaying.artist || "—"}
+            {nowPlaying.album ? ` · ${nowPlaying.album}` : ""}
+          </div>
         </div>
-      </div>
+      )}
 
       {/* Transport controls */}
       <div style={{

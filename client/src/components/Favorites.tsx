@@ -1,15 +1,12 @@
 interface Props {
   favorites: any[];
-  scenes: string[];
   activeRoom: string;
   onOpen: (index: number) => void;
-  onScene: (name: string) => void;
 }
 
-export default function Favorites({ favorites, scenes, activeRoom, onOpen, onScene }: Props) {
+export default function Favorites({ favorites, activeRoom, onOpen }: Props) {
   return (
     <div style={{ padding: 16, display: "flex", flexDirection: "column", gap: 20 }}>
-      {/* Favorites */}
       <section>
         <SectionLabel>Favorites</SectionLabel>
         {favorites.length === 0 && (
@@ -28,53 +25,12 @@ export default function Favorites({ favorites, scenes, activeRoom, onOpen, onSce
               key={i}
               name={fav.title || fav.name || `Favorite ${i + 1}`}
               art={fav.albumArt || fav.art}
-              onPlay={() => onOpen(i + 1)}
+              onPlay={() => onOpen(fav.position ?? i + 1)}
             />
           ))}
         </div>
       </section>
 
-      {/* Scenes */}
-      {scenes.length > 0 && (
-        <section>
-          <SectionLabel>Scenes</SectionLabel>
-          <div style={{
-            background: "var(--warm-white)",
-            border: "2px solid var(--cream-dark)",
-            borderRadius: 16,
-            overflow: "hidden",
-          }}>
-            {scenes.map((scene: any, i: number) => {
-              const name = typeof scene === "string" ? scene : scene.name;
-              return (
-                <button
-                  key={name}
-                  onClick={() => onScene(name)}
-                  style={{
-                    width: "100%",
-                    padding: "14px 16px",
-                    background: "transparent",
-                    borderBottom: i < scenes.length - 1 ? "1px solid var(--cream-dark)" : "none",
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "space-between",
-                    textAlign: "left",
-                  }}
-                >
-                  <span style={{ fontWeight: 600, color: "var(--espresso)" }}>🎭 {name}</span>
-                  <span style={{
-                    color: "var(--label-teal)",
-                    fontSize: 13,
-                    fontWeight: 600,
-                  }}>Apply →</span>
-                </button>
-              );
-            })}
-          </div>
-        </section>
-      )}
-
-      {/* Playing in */}
       <div style={{
         background: "var(--warm-white)",
         border: "2px solid var(--cream-dark)",
@@ -100,9 +56,7 @@ function SectionLabel({ children }: { children: React.ReactNode }) {
       color: "var(--walnut)",
       marginBottom: 10,
       paddingLeft: 2,
-    }}>
-      {children}
-    </div>
+    }}>{children}</div>
   );
 }
 

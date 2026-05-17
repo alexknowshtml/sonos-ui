@@ -116,6 +116,7 @@ export default function App() {
             onNext={() => s.next()}
             onPrev={() => s.prev()}
             onVolume={s.setVolume}
+            onOpenFavs={() => setTab("favs")}
           />
         )}
         {tab === "rooms" && (
@@ -135,10 +136,8 @@ export default function App() {
         {tab === "favs" && (
           <Favorites
             favorites={s.favorites}
-            scenes={s.scenes}
             activeRoom={s.activeRoom}
             onOpen={s.openFavorite}
-            onScene={s.applyScene}
           />
         )}
         {tab === "queue" && (
