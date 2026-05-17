@@ -478,7 +478,7 @@ serve({
               }));
               return json({ authorized: true });
             }
-            return json({ authorized: false, pending: data.error === "authorization_pending" });
+            return json({ authorized: false, pending: data.error === "authorization_pending", error: data.error ?? null });
           }
 
           if (path === "/api/yt/auth/status") {
