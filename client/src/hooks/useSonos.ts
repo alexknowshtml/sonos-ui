@@ -123,8 +123,10 @@ export function useSonos() {
   useEffect(() => {
     const id = setInterval(() => {
       const np = nowPlayingRef.current;
-      if (np.state !== "PLAYING" || livePositionRef.current === undefined || np.durationSec === undefined) return;
-      const next = Math.min(livePositionRef.current + 1, np.durationSec);
+      if (np.state !== "PLAYING" || livePositionRef.current === undefined) return;
+      const next = np.durationSec !== undefined
+        ? Math.min(livePositionRef.current + 1, np.durationSec)
+        : livePositionRef.current + 1;
       livePositionRef.current = next;
       setLivePosition(next);
     }, 1000);
