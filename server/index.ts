@@ -90,18 +90,33 @@ async function getRooms(force = false) {
   const rooms = await sonos("discover");
   if (!Array.isArray(rooms)) { roomsCache = { data: rooms, ts: Date.now() }; return rooms; }
 
-  const enriched = await Promise.all(
-    rooms.map(async (r: any) => {
-      try {
-        const [volume, muted] = await Promise.all([getRoomVolume(r.ip), getRoomMute(r.ip)]);
-        return { ...r, volume, muted };
-      } catch { return r; }
-    })
-  );
-  roomsCache = { data: enriched, ts: Date.now() };
-  upsertRooms(enriched);
-  for (const r of enriched) if (r.ip) subscribeToRoom(r.ip).catch(() => {});
-  return enriched;
+  const [enriched, groupData] = await Promise.all([
+    Promise.all(
+      rooms.map(async (r: any) => {
+        try {
+          const [volume, muted] = await Promise.all([getRoomVolume(r.ip), getRoomMute(r.ip)]);
+          return { ...r, volume, muted };
+        } catch { return r; }
+      })
+    ),
+    sonos("groups").catch(() => null),
+  ]);
+
+  // Merge groupId from live group data before DB write
+  const memberOf: Record<string, { groupId: string; coordinator: boolean }> = {};
+  if (groupData?.groups) {
+    for (const g of groupData.groups) {
+      for (const m of g.members ?? []) {
+        memberOf[m.name] = { groupId: g.id, coordinator: m.isCoordinator ?? false };
+      }
+    }
+  }
+  const withGroups = enriched.map((r: any) => ({ ...r, ...memberOf[r.name] }));
+
+  roomsCache = { data: withGroups, ts: Date.now() };
+  upsertRooms(withGroups);
+  for (const r of withGroups) if (r.ip) subscribeToRoom(r.ip).catch(() => {});
+  return withGroups;
 }
 
 async function getFavs(force = false) {
