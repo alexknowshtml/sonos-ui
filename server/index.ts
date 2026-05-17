@@ -5,6 +5,12 @@ import {
   initUpnp, subscribeToRoom, handleNotify,
   getRoomVolume, getRoomMute, setRoomVolume, setRoomMute,
 } from "./upnp";
+import {
+  getRoomsFromDB, upsertRooms,
+  getNowPlayingFromDB, upsertNowPlaying,
+  getFavoritesFromDB, upsertFavorites,
+  updateRoomVolume as dbUpdateRoomVolume,
+} from "./db";
 
 const SONOS = `${process.env.HOME}/bin/sonos`;
 const PORT = 2650;
@@ -92,6 +98,7 @@ async function getRooms(force = false) {
     })
   );
   roomsCache = { data: enriched, ts: Date.now() };
+  upsertRooms(enriched);
   for (const r of enriched) if (r.ip) subscribeToRoom(r.ip).catch(() => {});
   return enriched;
 }
@@ -105,7 +112,15 @@ async function getFavs(force = false) {
     return { title: f.title, albumArt: f.albumArtURI || f.albumArt, position: entry.position };
   });
   favCache = { data, ts: Date.now() };
+  upsertFavorites(data);
   return data;
+}
+
+async function pollNowPlaying() {
+  try {
+    const status = await sonos('status --name "Controller"');
+    upsertNowPlaying(status);
+  } catch {}
 }
 
 function startEventStream() {
@@ -117,7 +132,14 @@ function startEventStream() {
       const { done, value } = await reader.read();
       if (done) break;
       for (const line of decoder.decode(value).split("\n")) {
-        if (line.trim()) broadcast(JSON.parse(line));
+        if (!line.trim()) continue;
+        try {
+          const parsed = JSON.parse(line);
+          broadcast(parsed);
+          if (parsed.playbackState || parsed.currentTrack || parsed.state) {
+            upsertNowPlaying(parsed);
+          }
+        } catch {}
       }
     }
     setTimeout(startEventStream, 3000);
@@ -126,6 +148,14 @@ function startEventStream() {
 }
 
 startEventStream();
+
+// Warm DB and start background pollers
+getRooms().catch(() => {});
+getFavs().catch(() => {});
+pollNowPlaying();
+setInterval(() => getRooms().catch(() => {}), 60_000);
+setInterval(() => getFavs().catch(() => {}), 300_000);
+setInterval(pollNowPlaying, 10_000);
 
 async function serveStatic(path: string): Promise<Response> {
   const filePath = path === "/" ? join(PUBLIC, "index.html") : join(PUBLIC, path);
@@ -170,11 +200,18 @@ serve({
     if (path.startsWith("/api/")) {
       try {
         if (req.method === "GET") {
-          if (path === "/api/rooms") return json(await getRooms());
+          if (path === "/api/rooms") {
+            const cached = getRoomsFromDB();
+            if (cached.length > 0) return json(cached);
+            return json(await getRooms());
+          }
           if (path === "/api/rooms/refresh") return json(await getRooms(true));
           if (path === "/api/groups") return json(await sonos("--name Controller group status"));
-          if (path === "/api/favorites") return json(await getFavs());
-          if (path === "/api/scenes") return json(await sonos("scene list"));
+          if (path === "/api/favorites") {
+            const cached = getFavoritesFromDB();
+            if (cached.length > 0) return json(cached);
+            return json(await getFavs());
+          }
           if (path === "/api/queue") {
             const room = url.searchParams.get("room") || "Controller";
             if (!roomsCache) await getRooms();
@@ -194,8 +231,7 @@ serve({
             return json(tracks);
           }
           if (path === "/api/state") {
-            const [rooms, status] = await Promise.all([getRooms(), sonos("status --name Controller").catch(() => ({}))]);
-            return json({ rooms, status });
+            return json({ status: getNowPlayingFromDB() });
           }
         }
 
@@ -214,6 +250,7 @@ serve({
             const ip = getRoomIP(room);
             if (ip) {
               await setRoomVolume(ip, level);
+              dbUpdateRoomVolume(ip, level);
               if (roomsCache && Array.isArray(roomsCache.data)) {
                 const r = roomsCache.data.find((r: any) => r.name === room);
                 if (r) r.volume = level;
@@ -228,6 +265,7 @@ serve({
             const ip = getRoomIP(room);
             if (ip) {
               await setRoomMute(ip, muted);
+              dbUpdateRoomVolume(ip, undefined, muted);
               if (roomsCache && Array.isArray(roomsCache.data)) {
                 const r = roomsCache.data.find((r: any) => r.name === room);
                 if (r) r.muted = muted;
@@ -248,6 +286,7 @@ serve({
               const newVol = maxVol > 0 ? Math.round(target * ((r.volume ?? 0) / maxVol)) : target;
               await setRoomVolume(r.ip, newVol).catch(() => {});
               r.volume = newVol;
+              dbUpdateRoomVolume(r.ip, newVol);
             }));
             return json({ ok: true });
           }
@@ -259,8 +298,6 @@ serve({
           if (path === "/api/group/solo") return json(await sonos(`group solo --name "${room}"`));
 
           if (path === "/api/favorites/open") return json(await sonos(`favorites open --name "${room}" --index ${b.index}`));
-          if (path === "/api/scenes/apply") return json(await sonosPlain(`scene apply ${b.name}`));
-          if (path === "/api/scenes/save") return json(await sonosPlain(`scene save ${b.name}`));
         }
 
         return err("Not found", 404);

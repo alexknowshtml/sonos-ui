@@ -8,6 +8,7 @@ Daily-use Sonos controller for Indy Hall staff. Deployed at `sonos.indyhall.org`
 
 ## Completed
 
+- [x] SQLite state layer (`server/db.ts`) — instant reads, background pollers, restart-persistent
 - [x] PWA manifest + apple-touch-icon (iOS installable)
 - [x] Album art CORS proxy (`/api/art`)
 - [x] UPnP GENA subscriptions → SSE real-time volume push
@@ -44,5 +45,5 @@ _(requires 2+ rooms grouped)_
 ## Known Decisions
 - **Scope:** Daily use for staff — polish matters
 - **Scenes:** Removed (no scenes saved in the Sonos system)
-- **Storage:** All in-memory — no DB. Rooms cache 15s TTL, favorites 60s TTL.
-- **Architecture:** Bun server on Mac Mini → Sonos CLI + UPnP direct. SSE for browser push.
+- **Storage:** SQLite (`server/state.db`) — DB is source of truth. API reads are instant (sub-ms). Background pollers keep DB current: rooms every 60s, favorites every 5min, now_playing every 10s + live via watch stream.
+- **Architecture:** Bun server on Mac Mini → Sonos CLI + UPnP direct. SSE for browser push. First load is instant after first-ever cold start.

@@ -1,4 +1,5 @@
 // UPnP SOAP control and GENA subscription management for Sonos speakers
+import { updateRoomVolume } from "./db";
 
 type BroadcastFn = (data: object) => void;
 type RoomsCacheFn = () => { data: any[] } | null;
@@ -73,13 +74,16 @@ export function parseLastChange(xmlBody: string): { volume?: number; mute?: bool
 
 export function handleNotify(ip: string, xmlBody: string): void {
   const { volume, mute } = parseLastChange(xmlBody);
-  const cache = getRoomsCache();
-  if ((volume !== undefined || mute !== undefined) && cache && Array.isArray(cache.data)) {
-    const room = cache.data.find((r: any) => r.ip === ip);
-    if (room) {
-      if (volume !== undefined) room.volume = volume;
-      if (mute !== undefined) room.muted = mute;
-      broadcast({ type: "volume", room: room.name, volume, mute });
+  if (volume !== undefined || mute !== undefined) {
+    updateRoomVolume(ip, volume, mute);
+    const cache = getRoomsCache();
+    if (cache && Array.isArray(cache.data)) {
+      const room = cache.data.find((r: any) => r.ip === ip);
+      if (room) {
+        if (volume !== undefined) room.volume = volume;
+        if (mute !== undefined) room.muted = mute;
+        broadcast({ type: "volume", room: room.name, volume, mute });
+      }
     }
   }
 }
