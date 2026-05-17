@@ -172,8 +172,21 @@ serve({
           if (path === "/api/scenes") return json(await sonos("scene list"));
           if (path === "/api/queue") {
             const room = url.searchParams.get("room") || "Controller";
-            const data = await sonos(`queue --name "${room}"`);
-            return json(Array.isArray(data) ? data : (data?.queue ?? data?.tracks ?? []));
+            if (!roomsCache) await getRooms();
+            const ip = getRoomIP(room);
+            const data = await sonos(`queue list --name "${room}"`);
+            const items: any[] = Array.isArray(data)
+              ? data
+              : Array.isArray(data?.items) ? data.items : [];
+            const tracks = items.map((entry: any) => {
+              const t = entry.item ?? entry;
+              const rawArt: string = t.albumArtURI ?? t.albumArt ?? "";
+              const albumArt = rawArt.startsWith("/") && ip
+                ? `http://${ip}:1400${rawArt}`
+                : rawArt || undefined;
+              return { title: t.title, artist: t.artist, album: t.album, albumArt, uri: t.uri };
+            });
+            return json(tracks);
           }
           if (path === "/api/state") {
             const [rooms, status] = await Promise.all([getRooms(), sonos("status --name Controller").catch(() => ({}))]);
