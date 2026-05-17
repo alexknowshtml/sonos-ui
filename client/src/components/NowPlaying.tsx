@@ -1,9 +1,11 @@
 import type { NowPlaying, Room } from "../hooks/useSonos";
+import { PlayIcon, PauseIcon, SkipBackIcon, SkipForwardIcon, SpinnerIcon } from "./Icons";
 
 interface Props {
   nowPlaying: NowPlaying;
   rooms: Room[];
   activeRoom: string;
+  commandPending?: boolean;
   onPlay: () => void;
   onPause: () => void;
   onNext: () => void;
@@ -13,7 +15,7 @@ interface Props {
 }
 
 export default function NowPlaying({
-  nowPlaying, rooms, activeRoom,
+  nowPlaying, rooms, activeRoom, commandPending,
   onPlay, onPause, onNext, onPrev, onVolume, onOpenFavs,
 }: Props) {
   const isPlaying = nowPlaying.state === "PLAYING";
@@ -25,9 +27,10 @@ export default function NowPlaying({
     <div style={{ padding: "20px 16px", display: "flex", flexDirection: "column", gap: 20 }}>
       {/* Album art - vinyl record style */}
       <div style={{
-        width: "100%",
+        width: "min(100%, 360px)",
         aspectRatio: "1",
         borderRadius: 20,
+        alignSelf: "center",
         background: "var(--vinyl)",
         overflow: "hidden",
         display: "flex",
@@ -85,7 +88,7 @@ export default function NowPlaying({
               fontSize: 14,
               boxShadow: "0 2px 8px rgba(74,155,140,0.3)",
             }}
-          >Open Favorites</button>
+          >Browse YouTube Music</button>
         </div>
       ) : (
         <div style={{
@@ -112,11 +115,11 @@ export default function NowPlaying({
         gap: 24,
         padding: "8px 0",
       }}>
-        <TransportBtn onClick={onPrev} size={52}>⏮</TransportBtn>
-        <TransportBtn onClick={isPlaying ? onPause : onPlay} size={72} primary>
-          {isPlaying ? "⏸" : "▶"}
+        <TransportBtn onClick={onPrev} size={52} disabled={commandPending}><SkipBackIcon size={22} /></TransportBtn>
+        <TransportBtn onClick={isPlaying ? onPause : onPlay} size={72} primary disabled={commandPending}>
+          {commandPending ? <SpinnerIcon size={28} /> : isPlaying ? <PauseIcon size={28} /> : <PlayIcon size={28} />}
         </TransportBtn>
-        <TransportBtn onClick={onNext} size={52}>⏭</TransportBtn>
+        <TransportBtn onClick={onNext} size={52} disabled={commandPending}><SkipForwardIcon size={22} /></TransportBtn>
       </div>
 
       {/* Volume card */}
@@ -144,15 +147,16 @@ export default function NowPlaying({
   );
 }
 
-function TransportBtn({ children, onClick, size, primary }: {
+function TransportBtn({ children, onClick, size, primary, disabled }: {
   children: React.ReactNode;
   onClick: () => void;
   size: number;
   primary?: boolean;
+  disabled?: boolean;
 }) {
   return (
     <button
-      onClick={onClick}
+      onClick={disabled ? undefined : onClick}
       style={{
         width: size,
         height: size,
@@ -164,9 +168,11 @@ function TransportBtn({ children, onClick, size, primary }: {
         alignItems: "center",
         justifyContent: "center",
         boxShadow: primary ? "0 4px 16px rgba(74, 155, 140, 0.35)" : "0 2px 6px rgba(0,0,0,0.05)",
-        transition: "transform 0.1s",
+        transition: "transform 0.1s, opacity 0.15s",
+        opacity: disabled ? 0.5 : 1,
+        cursor: disabled ? "default" : "pointer",
       }}
-      onPointerDown={(e) => (e.currentTarget.style.transform = "scale(0.92)")}
+      onPointerDown={(e) => { if (!disabled) e.currentTarget.style.transform = "scale(0.92)"; }}
       onPointerUp={(e) => (e.currentTarget.style.transform = "scale(1)")}
     >{children}</button>
   );

@@ -14,7 +14,63 @@ import {
 } from "./db";
 
 const SONOS = `${process.env.HOME}/bin/sonos`;
+const YT_DLP = `${process.env.HOME}/bin/yt-dlp`;
+const YT_API_KEY = "***REDACTED***";
 const PORT = 2650;
+
+const ytUrlCache = new Map<string, { url: string; expires: number }>();
+const YT_URL_TTL_MS = 4 * 60 * 60 * 1000;
+
+const INVIDIOUS = [
+  "https://inv.bp.projectsegfault.net",
+  "https://invidious.nerdvpn.de",
+  "https://iv.melmac.space",
+];
+
+async function resolveViaInvidious(videoId: string): Promise<string | null> {
+  try {
+    return await Promise.any(
+      INVIDIOUS.map(async (base) => {
+        const res = await fetch(`${base}/api/v1/videos/${videoId}`, {
+          signal: AbortSignal.timeout(6000),
+          headers: { "User-Agent": "Mozilla/5.0" },
+        });
+        if (!res.ok) throw new Error("not ok");
+        const data: any = await res.json();
+        const audio = ((data.adaptiveFormats ?? []) as any[])
+          .filter((f) => f.type?.startsWith("audio/"))
+          .sort((a, b) => (b.bitrate ?? 0) - (a.bitrate ?? 0))[0];
+        if (!audio?.url) throw new Error("no audio");
+        return audio.url as string;
+      })
+    );
+  } catch { return null; }
+}
+
+async function resolveYtUrl(videoId: string): Promise<string | null> {
+  const cached = ytUrlCache.get(videoId);
+  if (cached && cached.expires > Date.now()) return cached.url;
+
+  const invUrl = await resolveViaInvidious(videoId);
+  if (invUrl) {
+    ytUrlCache.set(videoId, { url: invUrl, expires: Date.now() + YT_URL_TTL_MS });
+    return invUrl;
+  }
+
+  const DENO = `${process.env.HOME}/.deno/bin/deno`;
+  const proc = Bun.spawn(
+    [YT_DLP, "--js-runtimes", `deno:${DENO}`, "-f", "bestaudio[ext=webm]/bestaudio",
+     "--no-playlist", "--get-url", `https://music.youtube.com/watch?v=${videoId}`],
+    { stdout: "pipe", stderr: "pipe" }
+  );
+  const raw = (await new Response(proc.stdout).text()).trim().split("\n")[0];
+  await proc.exited;
+  if (raw?.startsWith("http")) {
+    ytUrlCache.set(videoId, { url: raw, expires: Date.now() + YT_URL_TTL_MS });
+    return raw;
+  }
+  return null;
+}
 const PUBLIC = join(import.meta.dir, "public");
 
 const sseClients = new Set<ReadableStreamDefaultController>();
@@ -305,6 +361,35 @@ serve({
           if (path === "/api/state") {
             return json({ status: getNowPlayingFromDB() });
           }
+
+          if (path === "/api/yt/search") {
+            const q = url.searchParams.get("q");
+            if (!q) return err("Missing q param", 400);
+            const ytUrl = `https://www.googleapis.com/youtube/v3/search?part=snippet&q=${encodeURIComponent(q)}&type=video&videoCategoryId=10&maxResults=20&key=${YT_API_KEY}`;
+            const res = await fetch(ytUrl, { signal: AbortSignal.timeout(8000) });
+            const data: any = await res.json();
+            if (!res.ok) return err(data?.error?.message ?? "YouTube search failed", res.status);
+            const items = (data.items ?? []).map((item: any) => ({
+              videoId: item.id?.videoId,
+              title: item.snippet?.title ?? "",
+              artist: item.snippet?.channelTitle ?? "",
+              thumbnail: item.snippet?.thumbnails?.medium?.url ?? item.snippet?.thumbnails?.default?.url,
+            })).filter((i: any) => i.videoId);
+            // Pre-warm #1 result in background using full resolution (so first tap is instant)
+            const topItem = items[0];
+            if (topItem && !ytUrlCache.has(topItem.videoId)) {
+              resolveYtUrl(topItem.videoId).catch(() => {});
+            }
+            // Try Invidious-only for results 2-5 (fast, best-effort)
+            for (const item of items.slice(1, 5)) {
+              if (!ytUrlCache.has(item.videoId)) {
+                resolveViaInvidious(item.videoId).then(url => {
+                  if (url) ytUrlCache.set(item.videoId, { url, expires: Date.now() + YT_URL_TTL_MS });
+                }).catch(() => {});
+              }
+            }
+            return json(items);
+          }
         }
 
         if (req.method === "POST") {
@@ -367,6 +452,16 @@ serve({
           if (path === "/api/group/solo") return json(await sonos(`group solo --name "${room}"`));
 
           if (path === "/api/favorites/open") return json(await sonos(`favorites open --name "${room}" --index ${b.index}`));
+
+          if (path === "/api/yt/play") {
+            const { videoId, room: r } = b;
+            if (!videoId) return err("Missing videoId", 400);
+            const targetRoom = r || "Controller";
+            const streamUrl = await resolveYtUrl(videoId);
+            if (!streamUrl) return err("Could not resolve stream URL");
+            await sonos(`play-uri "${streamUrl}" --name "${targetRoom}"`);
+            return json({ ok: true });
+          }
 
           if (path === "/api/seek") {
             const sec = Math.max(0, Math.round(Number(b.position ?? 0)));

@@ -2,11 +2,11 @@ import { useState, useEffect, useRef } from "react";
 import { useSonos } from "./hooks/useSonos";
 import NowPlaying from "./components/NowPlaying";
 import Rooms from "./components/Rooms";
-import Favorites from "./components/Favorites";
+import YouTubeMusic from "./components/YouTubeMusic";
 import Queue from "./components/Queue";
 import { PlayIcon, PauseIcon, SpinnerIcon } from "./components/Icons";
 
-type Tab = "now" | "rooms" | "favs" | "queue";
+type Tab = "now" | "rooms" | "yt" | "queue";
 
 function useIsTabletLandscape() {
   const mq = "(min-width: 768px) and (orientation: landscape)";
@@ -183,7 +183,7 @@ export default function App() {
       onNext={() => s.next()}
       onPrev={() => s.prev()}
       onVolume={s.setVolume}
-      onOpenFavs={() => setTab("favs")}
+      onOpenFavs={() => setTab("yt")}
     />
   );
 
@@ -227,13 +227,7 @@ export default function App() {
                 onUnjoin={s.unjoin}
               />
             )}
-            {tab === "favs" && (
-              <Favorites
-                favorites={s.favorites}
-                activeRoom={s.activeRoom}
-                onOpen={(index) => { s.openFavorite(index); setTab("now"); }}
-              />
-            )}
+            {tab === "yt" && <YouTubeMusic activeRoom={s.activeRoom} />}
           </div>
         </div>
 
@@ -242,7 +236,7 @@ export default function App() {
               {([
                 ["queue", "📋", "Queue"],
                 ["rooms", "🔊", "Rooms"],
-                ["favs", "⭐", "Favorites"],
+                ["yt", "▶️", "YouTube"],
               ] as [Tab, string, string][]).map(([id, icon, label]) => (
                 <button
                   key={id}
@@ -287,13 +281,7 @@ export default function App() {
             onUnjoin={s.unjoin}
           />
         )}
-        {tab === "favs" && (
-          <Favorites
-            favorites={s.favorites}
-            activeRoom={s.activeRoom}
-            onOpen={(index) => { s.openFavorite(index); setTab("now"); }}
-          />
-        )}
+        {tab === "yt" && <YouTubeMusic activeRoom={s.activeRoom} />}
         {tab === "queue" && queuePanel}
       </main>
 
@@ -302,7 +290,7 @@ export default function App() {
           ["now", "🎵", "Now Playing"],
           ["rooms", "🔊", "Rooms"],
           ["queue", "📋", "Queue"],
-          ["favs", "⭐", "Favorites"],
+          ["yt", "▶️", "YouTube"],
         ] as [Tab, string, string][]).map(([id, icon, label]) => (
           <button
             key={id}

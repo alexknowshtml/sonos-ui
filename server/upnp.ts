@@ -119,3 +119,13 @@ export async function setRoomVolume(ip: string, level: number): Promise<void> {
 export async function setRoomMute(ip: string, muted: boolean): Promise<void> {
   await upnpSoap(ip, "SetMute", `<InstanceID>0</InstanceID><Channel>Master</Channel><DesiredMute>${muted ? "1" : "0"}</DesiredMute>`);
 }
+
+// Find IP for a SID by matching the stable RINCON device ID prefix
+export function ipForSid(sid: string): string | null {
+  const rincon = sid?.match(/RINCON_[A-F0-9]+/i)?.[0];
+  if (!rincon) return null;
+  for (const [storedSid, ip] of subscriptions.entries()) {
+    if (storedSid.toUpperCase().includes(rincon.toUpperCase())) return ip;
+  }
+  return null;
+}
