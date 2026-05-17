@@ -188,7 +188,7 @@ export default function YouTubeMusic({ activeRoom }: Props) {
               style={{
                 flex: 1, padding: "10px 14px", borderRadius: 12,
                 border: "2px solid var(--cream-dark)", background: "var(--warm-white)",
-                fontSize: 15, color: "var(--espresso)", outline: "none", fontFamily: "inherit",
+                fontSize: 16, color: "var(--espresso)", outline: "none", fontFamily: "inherit",
               }}
             />
             <button
