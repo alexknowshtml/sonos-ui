@@ -16,7 +16,6 @@ import {
 
 const SONOS = `${process.env.HOME}/bin/sonos`;
 const YT_DLP = `${process.env.HOME}/bin/yt-dlp`;
-const YT_API_KEY = process.env.GOOGLE_API_KEY ?? "";
 const PORT = 2650;
 
 const ytUrlCache = new Map<string, { url: string; expires: number }>();
@@ -403,8 +402,10 @@ serve({
           if (path === "/api/yt/search") {
             const q = url.searchParams.get("q");
             if (!q) return err("Missing q param", 400);
-            const ytUrl = `https://www.googleapis.com/youtube/v3/search?part=snippet&q=${encodeURIComponent(q)}&type=video&videoCategoryId=10&maxResults=20&key=${YT_API_KEY}`;
-            const res = await fetch(ytUrl, { signal: AbortSignal.timeout(8000) });
+            const searchToken = await getYtAccessToken();
+            if (!searchToken) return err("Not authorized", 401);
+            const ytUrl = `https://www.googleapis.com/youtube/v3/search?part=snippet&q=${encodeURIComponent(q)}&type=video&videoCategoryId=10&maxResults=20`;
+            const res = await fetch(ytUrl, { headers: { Authorization: `Bearer ${searchToken}` }, signal: AbortSignal.timeout(8000) });
             const data: any = await res.json();
             if (!res.ok) return err(data?.error?.message ?? "YouTube search failed", res.status);
             const items = (data.items ?? []).map((item: any) => ({
