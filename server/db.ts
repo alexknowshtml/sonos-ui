@@ -23,6 +23,8 @@ db.exec(`
     album TEXT,
     album_art TEXT,
     state TEXT NOT NULL DEFAULT 'STOPPED',
+    position_sec INTEGER,
+    duration_sec INTEGER,
     updated_at INTEGER NOT NULL DEFAULT (unixepoch())
   );
   CREATE TABLE IF NOT EXISTS favorites (
@@ -50,6 +52,8 @@ db.exec(`INSERT OR IGNORE INTO now_playing (id, state) VALUES (1, 'STOPPED')`);
 
 // Migrate: add source column if it doesn't exist yet
 try { db.exec("ALTER TABLE favorites ADD COLUMN source TEXT"); } catch {}
+try { db.exec("ALTER TABLE now_playing ADD COLUMN position_sec INTEGER"); } catch {}
+try { db.exec("ALTER TABLE now_playing ADD COLUMN duration_sec INTEGER"); } catch {}
 
 export function getRoomsFromDB(): any[] {
   return db.query("SELECT name, ip, group_id as groupId, coordinator, volume, muted FROM rooms ORDER BY name").all();
@@ -96,17 +100,28 @@ export function updateRoomVolume(ip: string, volume?: number, muted?: boolean): 
 }
 
 export function getNowPlayingFromDB(): any {
-  return db.query("SELECT title, artist, album, album_art as albumArt, state FROM now_playing WHERE id = 1").get();
+  return db.query("SELECT title, artist, album, album_art as albumArt, state, position_sec as positionSec, duration_sec as durationSec FROM now_playing WHERE id = 1").get();
+}
+
+function parseTimecode(tc: string | undefined): number | null {
+  if (!tc) return null;
+  const parts = tc.split(":").map(Number);
+  if (parts.length === 3) return parts[0] * 3600 + parts[1] * 60 + parts[2];
+  if (parts.length === 2) return parts[0] * 60 + parts[1];
+  return null;
 }
 
 export function upsertNowPlaying(data: any): void {
-  // sonos status: data.nowPlaying + data.albumArtURL + data.transport.State
+  // sonos status: data.nowPlaying + data.albumArtURL + data.transport.State + data.position
   // sonos watch events: data.currentTrack + data.albumArt + data.playbackState
   const track = data.nowPlaying ?? data.currentTrack ?? {};
+  const pos = data.position;
   db.query(`
     UPDATE now_playing SET
       title = $title, artist = $artist, album = $album,
-      album_art = $albumArt, state = $state, updated_at = unixepoch()
+      album_art = $albumArt, state = $state,
+      position_sec = $positionSec, duration_sec = $durationSec,
+      updated_at = unixepoch()
     WHERE id = 1
   `).run({
     $title: track.title ?? data.title ?? null,
@@ -114,6 +129,8 @@ export function upsertNowPlaying(data: any): void {
     $album: track.album ?? data.album ?? null,
     $albumArt: data.albumArtURL ?? track.albumArtURI ?? track.albumArt ?? data.albumArt ?? null,
     $state: data.transport?.State ?? data.playbackState ?? data.state ?? "STOPPED",
+    $positionSec: pos ? parseTimecode(pos.RelTime) : null,
+    $durationSec: pos ? parseTimecode(pos.TrackDuration) : null,
   });
 }
 

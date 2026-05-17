@@ -17,6 +17,8 @@ export interface NowPlaying {
   albumArt?: string;
   state?: string;
   room?: string;
+  positionSec?: number;
+  durationSec?: number;
 }
 
 export interface QueueTrack {
@@ -47,10 +49,12 @@ export function useSonos() {
   const [loading, setLoading] = useState(true);
   const [activeRoom, setActiveRoom] = useState("Controller");
   const [commandPending, setCommandPending] = useState(false);
+  const [livePosition, setLivePosition] = useState<number | undefined>(undefined);
 
   // Ref so poll-until-changed closure always reads latest state
   const nowPlayingRef = useRef<NowPlaying>({});
   const commandPendingRef = useRef(false);
+  const livePositionRef = useRef<number | undefined>(undefined);
 
   const applyGroupData = (rooms: Room[], groupData: any): Room[] => {
     if (!groupData?.groups) return rooms;
@@ -79,6 +83,10 @@ export function useSonos() {
       if (data.status) {
         setNowPlaying(data.status);
         nowPlayingRef.current = data.status;
+        if (data.status.positionSec !== undefined) {
+          livePositionRef.current = data.status.positionSec;
+          setLivePosition(data.status.positionSec);
+        }
         return data.status as NowPlaying;
       }
     } catch {}
@@ -109,6 +117,18 @@ export function useSonos() {
     const id = setInterval(() => refreshNowPlaying(), 12000);
     return () => clearInterval(id);
   }, [refreshNowPlaying]);
+
+  // Tick position forward every second while playing
+  useEffect(() => {
+    const id = setInterval(() => {
+      const np = nowPlayingRef.current;
+      if (np.state !== "PLAYING" || livePositionRef.current === undefined || np.durationSec === undefined) return;
+      const next = Math.min(livePositionRef.current + 1, np.durationSec);
+      livePositionRef.current = next;
+      setLivePosition(next);
+    }, 1000);
+    return () => clearInterval(id);
+  }, []);
 
   // Refresh on tab focus — covers device wake / background
   useEffect(() => {
@@ -209,6 +229,11 @@ export function useSonos() {
   const joinGroup = (room: string, to: string) => post("/group/join", { room, to }).then(() => refreshRooms(true));
   const unjoin = (room: string) => post("/group/unjoin", { room }).then(() => refreshRooms(true));
   const solo = (room: string) => post("/group/solo", { room }).then(() => refreshRooms(true));
+  const seek = (position: number, room = activeRoom) => {
+    livePositionRef.current = position;
+    setLivePosition(position);
+    return post("/seek", { room, position });
+  };
   const openFavorite = (index: number, room = activeRoom) => {
     const snapshot = { ...nowPlayingRef.current };
     setCommandPending(true);
@@ -218,10 +243,10 @@ export function useSonos() {
 
   return {
     rooms, nowPlaying, favorites, queue, loading, activeRoom, setActiveRoom,
-    commandPending,
+    commandPending, livePosition,
     play, pause, next, prev, setVolume, setMute, setGroupVolume,
     party, dissolve, joinGroup, unjoin, solo,
-    openFavorite, fetchQueue,
+    openFavorite, fetchQueue, seek,
     refresh: () => { refreshRooms(true); refreshNowPlaying(); },
   };
 }

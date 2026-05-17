@@ -367,6 +367,15 @@ serve({
           if (path === "/api/group/solo") return json(await sonos(`group solo --name "${room}"`));
 
           if (path === "/api/favorites/open") return json(await sonos(`favorites open --name "${room}" --index ${b.index}`));
+
+          if (path === "/api/seek") {
+            const sec = Math.max(0, Math.round(Number(b.position ?? 0)));
+            const h = Math.floor(sec / 3600);
+            const m = Math.floor((sec % 3600) / 60);
+            const s = sec % 60;
+            const tc = `${String(h).padStart(2,"0")}:${String(m).padStart(2,"0")}:${String(s).padStart(2,"0")}`;
+            return json(await sonos(`seek --name "${room}" --time "${tc}"`));
+          }
         }
 
         return err("Not found", 404);
