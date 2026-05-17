@@ -50,6 +50,7 @@ export function useSonos() {
   const [activeRoom, setActiveRoom] = useState("Controller");
   const [commandPending, setCommandPending] = useState(false);
   const [livePosition, setLivePosition] = useState<number | undefined>(undefined);
+  const [commandError, setCommandError] = useState<string | null>(null);
 
   // Ref so poll-until-changed closure always reads latest state
   const nowPlayingRef = useRef<NowPlaying>({});
@@ -162,30 +163,43 @@ export function useSonos() {
     return () => es.close();
   }, []);
 
-  // Poll every 1.5s until state changes from snapshot, then clear pending
+  const failCommand = useCallback((msg: string) => {
+    setCommandPending(false);
+    commandPendingRef.current = false;
+    setCommandError(msg);
+  }, []);
+
+  // Poll every 1.5s until state changes from snapshot, then clear pending.
+  // Bails with error after 25s — handles silent Sonos failures.
   const pollUntilChanged = useCallback((snapshot: NowPlaying) => {
-    let attempts = 0;
+    let elapsed = 0;
     const id = setInterval(async () => {
-      attempts++;
+      elapsed += 1500;
       const fresh = await refreshNowPlaying();
       if (!fresh) return;
-      const changed =
-        fresh.title !== snapshot.title ||
-        fresh.state !== snapshot.state;
+      const changed = fresh.title !== snapshot.title || fresh.state !== snapshot.state;
       if (changed || !commandPendingRef.current) {
         clearInterval(id);
         setCommandPending(false);
         commandPendingRef.current = false;
+      } else if (elapsed >= 25000) {
+        clearInterval(id);
+        failCommand("Sonos didn't respond — it may have failed silently");
       }
     }, 1500);
-  }, [refreshNowPlaying]);
+  }, [refreshNowPlaying, failCommand]);
 
   const withPending = useCallback((fn: () => Promise<any>, waitForChange = false) => {
     const snapshot = { ...nowPlayingRef.current };
     setCommandPending(true);
+    setCommandError(null);
     commandPendingRef.current = true;
     return fn()
-      .then(() => {
+      .then((res: any) => {
+        if (res?.error) {
+          failCommand(res.error);
+          return;
+        }
         if (waitForChange) {
           pollUntilChanged(snapshot);
         } else {
@@ -193,11 +207,8 @@ export function useSonos() {
           commandPendingRef.current = false;
         }
       })
-      .catch(() => {
-        setCommandPending(false);
-        commandPendingRef.current = false;
-      });
-  }, [pollUntilChanged]);
+      .catch((e: any) => failCommand(e?.message ?? "Command failed"));
+  }, [pollUntilChanged, failCommand]);
 
   const setVolume = (room: string, level: number) => {
     setRooms((prev) => prev.map((r) => r.name === room ? { ...r, volume: level } : r));
@@ -237,13 +248,20 @@ export function useSonos() {
   const openFavorite = (index: number, room = activeRoom) => {
     const snapshot = { ...nowPlayingRef.current };
     setCommandPending(true);
+    setCommandError(null);
     commandPendingRef.current = true;
-    return post("/favorites/open", { room, index }).then(() => pollUntilChanged(snapshot));
+    return post("/favorites/open", { room, index })
+      .then((res: any) => {
+        if (res?.error) { failCommand(res.error); return; }
+        pollUntilChanged(snapshot);
+      })
+      .catch((e: any) => failCommand(e?.message ?? "Failed to open favorite"));
   };
+  const dismissError = () => setCommandError(null);
 
   return {
     rooms, nowPlaying, favorites, queue, loading, activeRoom, setActiveRoom,
-    commandPending, livePosition,
+    commandPending, commandError, dismissError, livePosition,
     play, pause, next, prev, setVolume, setMute, setGroupVolume,
     party, dissolve, joinGroup, unjoin, solo,
     openFavorite, fetchQueue, seek,

@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useSonos } from "./hooks/useSonos";
 import NowPlaying from "./components/NowPlaying";
 import Rooms from "./components/Rooms";
@@ -94,6 +94,34 @@ const MiniPlayer = ({ s }: { s: ReturnType<typeof useSonos> }) => {
   );
 };
 
+function ErrorBanner({ message, onDismiss }: { message: string; onDismiss: () => void }) {
+  const timerRef = useRef<ReturnType<typeof setTimeout>>();
+  useEffect(() => {
+    timerRef.current = setTimeout(onDismiss, 5000);
+    return () => clearTimeout(timerRef.current);
+  }, [message, onDismiss]);
+  return (
+    <div
+      onClick={onDismiss}
+      style={{
+        background: "var(--label-red)",
+        color: "#fff",
+        padding: "10px 16px",
+        fontSize: 13,
+        fontWeight: 600,
+        display: "flex",
+        alignItems: "center",
+        gap: 8,
+        flexShrink: 0,
+        cursor: "pointer",
+      }}
+    >
+      <span style={{ flex: 1 }}>⚠ {message}</span>
+      <span style={{ opacity: 0.7, fontSize: 16 }}>✕</span>
+    </div>
+  );
+}
+
 export default function App() {
   const [tab, setTab] = useState<Tab>("now");
   const s = useSonos();
@@ -168,6 +196,7 @@ export default function App() {
       <div style={{ display: "flex", flexDirection: "column", height: "100dvh" }}>
         {header}
         {s.nowPlaying.title && <MiniPlayer s={s} />}
+        {s.commandError && <ErrorBanner message={s.commandError} onDismiss={s.dismissError} />}
 
         {/* Landscape split: Now Playing left (2/3), right panel (1/3) */}
         <div style={{ flex: 1, display: "flex", overflow: "hidden" }}>
@@ -235,6 +264,7 @@ export default function App() {
     <div style={{ flex: 1, display: "flex", flexDirection: "column", height: "100dvh" }}>
       {header}
       {s.nowPlaying.title && <MiniPlayer s={s} />}
+      {s.commandError && <ErrorBanner message={s.commandError} onDismiss={s.dismissError} />}
 
       <main style={{ flex: 1, overflowY: "auto", WebkitOverflowScrolling: "touch", background: "var(--cream)" } as React.CSSProperties}>
         {tab === "now" && nowPlayingPanel}
