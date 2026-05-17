@@ -553,12 +553,13 @@ serve({
           if (path === "/api/favorites/open") return json(await sonos(`favorites open --name "${room}" --index ${b.index}`));
 
           if (path === "/api/yt/play") {
-            const { videoId, room: r } = b;
+            const { videoId, room: r, title } = b;
             if (!videoId) return err("Missing videoId", 400);
             const targetRoom = r || "Controller";
             const streamUrl = await resolveYtUrl(videoId);
             if (!streamUrl) return err("Could not resolve stream URL");
-            await sonos(`play-uri "${streamUrl}" --name "${targetRoom}"`);
+            const titleFlag = title ? ` --title "${title.replace(/"/g, '\\"')}"` : "";
+            await sonos(`play-uri "${streamUrl}" --name "${targetRoom}"${titleFlag}`);
             return json({ ok: true });
           }
 

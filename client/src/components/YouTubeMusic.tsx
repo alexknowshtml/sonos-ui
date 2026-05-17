@@ -31,8 +31,6 @@ export default function YouTubeMusic({ activeRoom }: Props) {
   const [searchLoading, setSearchLoading] = useState(false);
   const [playing, setPlaying] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [deviceCode, setDeviceCode] = useState<{ user_code: string; verification_url: string; interval: number } | null>(null);
-  const [connectLoading, setConnectLoading] = useState(false);
 
   const [playlists, setPlaylists] = useState<YTPlaylist[]>([]);
   const [playlistsLoading, setPlaylistsLoading] = useState(false);
@@ -46,34 +44,6 @@ export default function YouTubeMusic({ activeRoom }: Props) {
       .then((r) => r.json())
       .then((d) => setAuthorized(d.authorized))
       .catch(() => setAuthorized(false));
-  }, []);
-
-  const connectYT = useCallback(async () => {
-    setConnectLoading(true);
-    setError(null);
-    try {
-      const res = await fetch("/api/yt/auth");
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error ?? "Failed to start auth");
-      setDeviceCode({ user_code: data.user_code, verification_url: data.verification_url, interval: data.interval });
-      // Start polling
-      const poll = setInterval(async () => {
-        const r = await fetch("/api/yt/auth/poll").then((x) => x.json()).catch(() => ({}));
-        if (r.authorized) {
-          clearInterval(poll);
-          setDeviceCode(null);
-          setAuthorized(true);
-        } else if (r.error && r.error !== "authorization_pending") {
-          clearInterval(poll);
-          setDeviceCode(null);
-          setError("Auth expired. Try again.");
-        }
-      }, (data.interval ?? 5) * 1000);
-    } catch (e: any) {
-      setError(e.message);
-    } finally {
-      setConnectLoading(false);
-    }
   }, []);
 
   const search = useCallback(async () => {
@@ -142,7 +112,7 @@ export default function YouTubeMusic({ activeRoom }: Props) {
       await fetch("/api/yt/play", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ videoId: track.videoId, room: activeRoom }),
+        body: JSON.stringify({ videoId: track.videoId, room: activeRoom, title: `${track.title} — ${track.artist}` }),
       });
     } finally {
       setPlaying(null);
@@ -231,37 +201,8 @@ export default function YouTubeMusic({ activeRoom }: Props) {
         </>
       )}
 
-      {tab === "library" && !authorized && !deviceCode && (
-        <div style={{ textAlign: "center", padding: 32, display: "flex", flexDirection: "column", gap: 16, alignItems: "center" }}>
-          <div style={{ fontSize: 14, color: "var(--walnut)" }}>Connect your YouTube account to browse your playlists and liked songs.</div>
-          <button
-            onClick={connectYT}
-            disabled={connectLoading}
-            style={{ padding: "12px 24px", borderRadius: 12, background: "var(--label-teal)", color: "#fff", fontWeight: 700, fontSize: 15, cursor: connectLoading ? "default" : "pointer", opacity: connectLoading ? 0.6 : 1, display: "flex", alignItems: "center", gap: 8 }}
-          >
-            {connectLoading ? <SpinnerIcon size={16} /> : null}
-            Connect YouTube Music
-          </button>
-        </div>
-      )}
-
-      {tab === "library" && !authorized && deviceCode && (
-        <div style={{ display: "flex", flexDirection: "column", gap: 12, padding: "8px 0" }}>
-          <div style={{ background: "var(--warm-white)", border: "2px solid var(--cream-dark)", borderRadius: 14, padding: 20, display: "flex", flexDirection: "column", gap: 12 }}>
-            <div style={{ fontSize: 13, color: "var(--walnut)", lineHeight: 1.5 }}>
-              1. Go to <strong style={{ color: "var(--espresso)" }}>{deviceCode.verification_url}</strong>
-            </div>
-            <div style={{ fontSize: 13, color: "var(--walnut)" }}>
-              2. Enter code:
-            </div>
-            <div style={{ fontFamily: "monospace", fontSize: 24, fontWeight: 700, letterSpacing: 4, color: "var(--espresso)", textAlign: "center", background: "var(--cream-dark)", borderRadius: 10, padding: "12px 0" }}>
-              {deviceCode.user_code}
-            </div>
-            <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, color: "var(--walnut)", justifyContent: "center" }}>
-              <SpinnerIcon size={14} /> Waiting for approval
-            </div>
-          </div>
-        </div>
+      {tab === "library" && !authorized && (
+        <EmptyState>YouTube Music is not connected. Ask Alex to run seed-yt-creds.sh on the server.</EmptyState>
       )}
 
       {tab === "library" && authorized && !currentPlaylist && (
