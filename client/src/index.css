@@ -58,6 +58,11 @@ button {
   font-size: 1rem;
 }
 
+input[type="text"],
+input[type="search"] {
+  font-size: 16px;
+}
+
 input[type="range"] {
   -webkit-appearance: none;
   width: 100%;
