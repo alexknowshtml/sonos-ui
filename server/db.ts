@@ -3,8 +3,8 @@ import { join } from "path";
 
 const DB_PATH = join(import.meta.dir, "state.db");
 export const db = new Database(DB_PATH, { create: true });
-db.pragma("journal_mode = WAL");
-db.pragma("synchronous = NORMAL");
+db.exec("PRAGMA journal_mode = WAL");
+db.exec("PRAGMA synchronous = NORMAL");
 
 db.exec(`
   CREATE TABLE IF NOT EXISTS rooms (

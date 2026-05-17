@@ -47,28 +47,26 @@ export function useSonos() {
   const [loading, setLoading] = useState(true);
   const [activeRoom, setActiveRoom] = useState("Controller");
 
+  const applyGroupData = (rooms: Room[], groupData: any): Room[] => {
+    if (!groupData?.groups) return rooms;
+    const memberOf: Record<string, { groupId: string; coordinator: boolean }> = {};
+    for (const g of groupData.groups) {
+      for (const m of g.members ?? []) {
+        memberOf[m.name] = { groupId: g.id, coordinator: m.isCoordinator ?? false };
+      }
+    }
+    return rooms.map((r) => ({ ...r, ...memberOf[r.name] }));
+  };
+
   const refreshRooms = useCallback(async (force = false) => {
     const path = force ? "/rooms/refresh" : "/rooms";
-    const [roomData, groupData] = await Promise.all([
-      fetch(`${API}${path}`).then((r) => r.json()),
-      fetch(`${API}/groups`).then((r) => r.json()).catch(() => null),
-    ]);
-    let rooms: Room[] = Array.isArray(roomData) ? roomData : roomData?.zones ?? [];
-
-    if (groupData?.groups) {
-      const memberOf: Record<string, { groupId: string; coordinator: boolean }> = {};
-      for (const g of groupData.groups) {
-        for (const m of g.members ?? []) {
-          memberOf[m.name] = {
-            groupId: g.id,
-            coordinator: m.isCoordinator ?? false,
-          };
-        }
-      }
-      rooms = rooms.map((r) => ({ ...r, ...memberOf[r.name] }));
-    }
-
+    const roomData = await fetch(`${API}${path}`).then((r) => r.json());
+    const rooms: Room[] = Array.isArray(roomData) ? roomData : roomData?.zones ?? [];
     setRooms(rooms);
+    // Fetch group membership in background — DB rooms already have groupId but this refreshes it
+    fetch(`${API}/groups`).then((r) => r.json())
+      .then((gd) => setRooms((prev) => applyGroupData(prev, gd)))
+      .catch(() => {});
   }, []);
 
   const refreshNowPlaying = useCallback(async () => {
