@@ -25,6 +25,7 @@ export default function Favorites({ favorites, activeRoom, onOpen }: Props) {
               key={i}
               name={fav.title || fav.name || `Favorite ${i + 1}`}
               art={fav.albumArt || fav.art}
+              source={fav.source}
               onPlay={() => onOpen(fav.position ?? i + 1)}
             />
           ))}
@@ -60,7 +61,7 @@ function SectionLabel({ children }: { children: React.ReactNode }) {
   );
 }
 
-function FavTile({ name, art, onPlay }: { name: string; art?: string; onPlay: () => void }) {
+function FavTile({ name, art, source, onPlay }: { name: string; art?: string; source?: string; onPlay: () => void }) {
   return (
     <button
       onClick={onPlay}
@@ -104,14 +105,27 @@ function FavTile({ name, art, onPlay }: { name: string; art?: string; onPlay: ()
           </div>
         )}
       </div>
-      <div style={{
-        padding: "10px 12px 12px",
-        fontSize: 13,
-        fontWeight: 600,
-        lineHeight: 1.3,
-        color: "var(--espresso)",
-      }}>
-        {name}
+      <div style={{ padding: "10px 12px 12px" }}>
+        <div style={{
+          fontSize: 13,
+          fontWeight: 600,
+          lineHeight: 1.3,
+          color: "var(--espresso)",
+        }}>
+          {name}
+        </div>
+        {source && source !== "Sonos" && (
+          <div style={{
+            fontSize: 10,
+            fontWeight: 500,
+            color: "var(--sand)",
+            marginTop: 3,
+            textTransform: "uppercase",
+            letterSpacing: "0.04em",
+          }}>
+            {source}
+          </div>
+        )}
       </div>
     </button>
   );

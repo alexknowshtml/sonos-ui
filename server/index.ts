@@ -2,7 +2,7 @@ import { serve, file } from "bun";
 import { join } from "path";
 import { networkInterfaces } from "os";
 import {
-  initUpnp, subscribeToRoom, handleNotify,
+  initUpnp, subscribeToRoom, handleNotify, ipForSid,
   getRoomVolume, getRoomMute, setRoomVolume, setRoomMute,
 } from "./upnp";
 import {
@@ -119,13 +119,37 @@ async function getRooms(force = false) {
   return withGroups;
 }
 
+function detectSource(uri: string, albumArt: string): string {
+  const u = (uri || "").toLowerCase();
+  const a = (albumArt || "").toLowerCase();
+  if (u.includes("spotify")) return "Spotify";
+  if (u.includes("ihr%3a")) return "iHeart Radio";
+  if (u.includes("tunein%3a")) return "TuneIn";
+  if (u.includes("sid=174") || u.includes("10062a6c")) return "Tidal";
+  if (u.includes("sid=204") || u.includes("radio%3ara")) return "Apple Music";
+  if (u.includes("sonosapi-hls-static")) {
+    if (a.includes("googleusercontent")) return "YouTube Music";
+    return "Streaming";
+  }
+  if (a.includes("spotifycdn") || a.includes("i.scdn.co") || a.includes("spotify-static")) return "Spotify";
+  if (a.includes("resources.tidal.com") || a.includes("smapi.tidal.com")) return "Tidal";
+  if (a.includes("mzstatic.com")) return "Apple Music";
+  if (a.includes("sonosradio.imgix.net")) return "Sonos Radio";
+  if (a.includes("googleusercontent")) return "YouTube Music";
+  if (a.includes("partnerid=ihr")) return "iHeart Radio";
+  if (a.includes("partnerid=tunein")) return "TuneIn";
+  return "Sonos";
+}
+
 async function getFavs(force = false) {
   if (!force && favCache && Date.now() - favCache.ts < 60000) return favCache.data;
   const raw = await sonos('favorites list --name "Controller"');
   const items: any[] = Array.isArray(raw) ? raw : Array.isArray(raw?.items) ? raw.items : [];
   const data = items.map((entry: any) => {
     const f = entry.item ?? entry;
-    return { title: f.title, albumArt: f.albumArtURI || f.albumArt, position: entry.position };
+    const albumArt = f.albumArtURI || f.albumArt || "";
+    const uri = f.uri || "";
+    return { title: f.title, albumArt: albumArt || undefined, position: entry.position, source: detectSource(uri, albumArt) };
   });
   favCache = { data, ts: Date.now() };
   upsertFavorites(data);
@@ -166,6 +190,33 @@ function startEventStream() {
         if (!line.trim()) continue;
         try {
           const parsed = JSON.parse(line);
+
+          // Translate renderingcontrol volume events — match room by RINCON ID in SID
+          if (parsed.service === "renderingcontrol" && parsed.vars?.volume_master !== undefined) {
+            const rincon = parsed.sid?.match(/RINCON_[A-F0-9]+/i)?.[0];
+            if (rincon && roomsCache && Array.isArray(roomsCache.data)) {
+              const room = roomsCache.data.find((r: any) =>
+                r.udn?.toUpperCase().includes(rincon.toUpperCase())
+              );
+              if (room) {
+                const vol = parseInt(parsed.vars.volume_master, 10);
+                if (!isNaN(vol)) {
+                  dbUpdateRoomVolume(room.ip, vol);
+                  room.volume = vol;
+                  broadcast({ type: "volume", room: room.name, volume: vol });
+                  continue;
+                }
+              }
+            }
+          }
+
+          // Translate avtransport state change events into typed transport broadcasts
+          if (parsed.service === "avtransport" && parsed.vars?.transport_state) {
+            broadcast({ type: "transport", state: parsed.vars.transport_state });
+            pollNowPlaying();
+            continue;
+          }
+
           broadcast(parsed);
           if (parsed.playbackState || parsed.currentTrack || parsed.state) {
             upsertNowPlaying(parsed);
@@ -268,17 +319,14 @@ serve({
 
           if (path === "/api/volume") {
             const level = Math.min(100, Math.max(0, Number(b.level ?? 30)));
+            await sonos(`volume set --name "${room}" ${level}`);
             const ip = getRoomIP(room);
-            if (ip) {
-              await setRoomVolume(ip, level);
-              dbUpdateRoomVolume(ip, level);
-              if (roomsCache && Array.isArray(roomsCache.data)) {
-                const r = roomsCache.data.find((r: any) => r.name === room);
-                if (r) r.volume = level;
-              }
-              return json({ ok: true });
+            if (ip) dbUpdateRoomVolume(ip, level);
+            if (roomsCache && Array.isArray(roomsCache.data)) {
+              const r = roomsCache.data.find((r: any) => r.name === room);
+              if (r) r.volume = level;
             }
-            return json(await sonos(`volume set --name "${room}" ${level}`));
+            return json({ ok: true });
           }
 
           if (path === "/api/mute") {

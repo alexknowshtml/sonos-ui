@@ -29,6 +29,7 @@ db.exec(`
     position INTEGER PRIMARY KEY,
     title TEXT NOT NULL,
     album_art TEXT,
+    source TEXT,
     updated_at INTEGER NOT NULL DEFAULT (unixepoch())
   );
   CREATE TABLE IF NOT EXISTS queue (
@@ -46,6 +47,9 @@ db.exec(`
 
 // Ensure now_playing row exists
 db.exec(`INSERT OR IGNORE INTO now_playing (id, state) VALUES (1, 'STOPPED')`);
+
+// Migrate: add source column if it doesn't exist yet
+try { db.exec("ALTER TABLE favorites ADD COLUMN source TEXT"); } catch {}
 
 export function getRoomsFromDB(): any[] {
   return db.query("SELECT name, ip, group_id as groupId, coordinator, volume, muted FROM rooms ORDER BY name").all();
@@ -96,22 +100,25 @@ export function getNowPlayingFromDB(): any {
 }
 
 export function upsertNowPlaying(data: any): void {
+  // sonos status: data.nowPlaying + data.albumArtURL + data.transport.State
+  // sonos watch events: data.currentTrack + data.albumArt + data.playbackState
+  const track = data.nowPlaying ?? data.currentTrack ?? {};
   db.query(`
     UPDATE now_playing SET
       title = $title, artist = $artist, album = $album,
       album_art = $albumArt, state = $state, updated_at = unixepoch()
     WHERE id = 1
   `).run({
-    $title: data.currentTrack?.title ?? data.title ?? null,
-    $artist: data.currentTrack?.artist ?? data.artist ?? null,
-    $album: data.currentTrack?.album ?? data.album ?? null,
-    $albumArt: data.currentTrack?.albumArtURI ?? data.albumArt ?? null,
-    $state: data.playbackState ?? data.state ?? "STOPPED",
+    $title: track.title ?? data.title ?? null,
+    $artist: track.artist ?? data.artist ?? null,
+    $album: track.album ?? data.album ?? null,
+    $albumArt: data.albumArtURL ?? track.albumArtURI ?? track.albumArt ?? data.albumArt ?? null,
+    $state: data.transport?.State ?? data.playbackState ?? data.state ?? "STOPPED",
   });
 }
 
 export function getFavoritesFromDB(): any[] {
-  return db.query("SELECT position, title, album_art as albumArt FROM favorites ORDER BY position").all();
+  return db.query("SELECT position, title, album_art as albumArt, source FROM favorites ORDER BY position").all();
 }
 
 export function getQueueFromDB(room: string): any[] {
@@ -138,15 +145,15 @@ export function upsertQueue(room: string, tracks: any[]): void {
 
 export function upsertFavorites(favs: any[]): void {
   const stmt = db.prepare(`
-    INSERT INTO favorites (position, title, album_art, updated_at)
-    VALUES ($position, $title, $albumArt, unixepoch())
+    INSERT INTO favorites (position, title, album_art, source, updated_at)
+    VALUES ($position, $title, $albumArt, $source, unixepoch())
     ON CONFLICT(position) DO UPDATE SET
-      title = excluded.title, album_art = excluded.album_art, updated_at = unixepoch()
+      title = excluded.title, album_art = excluded.album_art, source = excluded.source, updated_at = unixepoch()
   `);
   const upsertMany = db.transaction((rows: any[]) => {
     db.exec("DELETE FROM favorites");
     for (const r of rows) {
-      stmt.run({ $position: r.position, $title: r.title ?? "", $albumArt: r.albumArt ?? null });
+      stmt.run({ $position: r.position, $title: r.title ?? "", $albumArt: r.albumArt ?? null, $source: r.source ?? null });
     }
   });
   upsertMany(favs);
