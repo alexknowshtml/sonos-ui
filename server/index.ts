@@ -15,7 +15,7 @@ import {
 
 const SONOS = `${process.env.HOME}/bin/sonos`;
 const YT_DLP = `${process.env.HOME}/bin/yt-dlp`;
-const YT_API_KEY = "***REDACTED***";
+const YT_API_KEY = process.env.GOOGLE_API_KEY ?? "";
 const PORT = 2650;
 
 const ytUrlCache = new Map<string, { url: string; expires: number }>();
