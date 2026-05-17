@@ -563,6 +563,29 @@ serve({
             return json({ ok: true });
           }
 
+          if (path === "/api/yt/queue") {
+            const { videoId, room: r, title } = b;
+            if (!videoId) return err("Missing videoId", 400);
+            const targetRoom = r || "Controller";
+            if (!roomsCache) await getRooms();
+            const ip = getRoomIP(targetRoom);
+            if (!ip) return err("Room not found");
+            const streamUrl = await resolveYtUrl(videoId);
+            if (!streamUrl) return err("Could not resolve stream URL");
+            const safeTitle = (title ?? videoId).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+            const safeUrl = streamUrl.replace(/&/g, "&amp;");
+            const didl = `&lt;DIDL-Lite xmlns="urn:schemas-upnp-org:metadata-1-0/DIDL-Lite/" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:upnp="urn:schemas-upnp-org:metadata-1-0/upnp/"&gt;&lt;item id="0" parentID="0" restricted="1"&gt;&lt;dc:title&gt;${safeTitle}&lt;/dc:title&gt;&lt;upnp:class&gt;object.item.audioItem.musicTrack&lt;/upnp:class&gt;&lt;res protocolInfo="http-get:*:audio/webm:*"&gt;${safeUrl}&lt;/res&gt;&lt;/item&gt;&lt;/DIDL-Lite&gt;`;
+            const soapBody = `<?xml version="1.0"?><s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/"><s:Body><u:AddURIToQueue xmlns:u="urn:schemas-upnp-org:service:AVTransport:1"><InstanceID>0</InstanceID><EnqueuedURI>${safeUrl}</EnqueuedURI><EnqueuedURIMetaData>${didl}</EnqueuedURIMetaData><DesiredFirstTrackNumberEnqueued>0</DesiredFirstTrackNumberEnqueued><EnqueueAsNext>0</EnqueueAsNext></u:AddURIToQueue></s:Body></s:Envelope>`;
+            const res = await fetch(`http://${ip}:1400/MediaRenderer/AVTransport/Control`, {
+              method: "POST",
+              headers: { "Content-Type": 'text/xml; charset="utf-8"', SOAPAction: '"urn:schemas-upnp-org:service:AVTransport:1#AddURIToQueue"' },
+              body: soapBody,
+              signal: AbortSignal.timeout(5000),
+            });
+            if (!res.ok) return err("Failed to queue track");
+            return json({ ok: true });
+          }
+
           if (path === "/api/seek") {
             const sec = Math.max(0, Math.round(Number(b.position ?? 0)));
             const h = Math.floor(sec / 3600);

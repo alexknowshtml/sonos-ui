@@ -119,6 +119,24 @@ export default function YouTubeMusic({ activeRoom }: Props) {
     }
   }, [activeRoom]);
 
+  const [queuing, setQueuing] = useState<string | null>(null);
+  const [queuedId, setQueuedId] = useState<string | null>(null);
+
+  const queue = useCallback(async (track: YTTrack) => {
+    setQueuing(track.videoId);
+    try {
+      await fetch("/api/yt/queue", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ videoId: track.videoId, room: activeRoom, title: `${track.title} — ${track.artist}` }),
+      });
+      setQueuedId(track.videoId);
+      setTimeout(() => setQueuedId(null), 2000);
+    } finally {
+      setQueuing(null);
+    }
+  }, [activeRoom]);
+
   if (authorized === null) {
     return (
       <div style={{ padding: 32, display: "flex", justifyContent: "center" }}>
@@ -190,7 +208,7 @@ export default function YouTubeMusic({ activeRoom }: Props) {
           {results.length > 0 && (
             <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
               {results.map((track) => (
-                <TrackRow key={track.videoId} track={track} isPlaying={playing === track.videoId} onPlay={() => play(track)} />
+                <TrackRow key={track.videoId} track={track} isPlaying={playing === track.videoId} isQueuing={queuing === track.videoId} justQueued={queuedId === track.videoId} onPlay={() => play(track)} onQueue={() => queue(track)} />
               ))}
             </div>
           )}
@@ -235,7 +253,7 @@ export default function YouTubeMusic({ activeRoom }: Props) {
           {playlistTracks.length > 0 && (
             <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
               {playlistTracks.map((track) => (
-                <TrackRow key={track.videoId} track={track} isPlaying={playing === track.videoId} onPlay={() => play(track)} />
+                <TrackRow key={track.videoId} track={track} isPlaying={playing === track.videoId} isQueuing={queuing === track.videoId} justQueued={queuedId === track.videoId} onPlay={() => play(track)} onQueue={() => queue(track)} />
               ))}
               {playlistNextPage && (
                 <button
@@ -261,35 +279,55 @@ export default function YouTubeMusic({ activeRoom }: Props) {
   );
 }
 
-function TrackRow({ track, isPlaying, onPlay }: { track: YTTrack; isPlaying: boolean; onPlay: () => void }) {
+function TrackRow({ track, isPlaying, isQueuing, justQueued, onPlay, onQueue }: { track: YTTrack; isPlaying: boolean; isQueuing: boolean; justQueued: boolean; onPlay: () => void; onQueue: () => void }) {
   return (
-    <button
-      onClick={isPlaying ? undefined : onPlay}
+    <div
       style={{
         display: "flex", alignItems: "center", gap: 12, background: "var(--warm-white)",
-        border: "2px solid var(--cream-dark)", borderRadius: 14, padding: 10, textAlign: "left",
-        opacity: isPlaying ? 0.7 : 1, cursor: isPlaying ? "default" : "pointer",
+        border: "2px solid var(--cream-dark)", borderRadius: 14, padding: 10,
+        opacity: isPlaying ? 0.7 : 1,
         boxShadow: "0 2px 6px rgba(0,0,0,0.04)", transition: "opacity 0.15s",
       }}
     >
       <Thumb src={track.thumbnail} />
-      <div style={{ flex: 1, minWidth: 0 }}>
+      <button
+        onClick={isPlaying ? undefined : onPlay}
+        style={{ flex: 1, minWidth: 0, textAlign: "left", background: "none", cursor: isPlaying ? "default" : "pointer" }}
+      >
         <div style={{ fontSize: 13, fontWeight: 600, color: "var(--espresso)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", lineHeight: 1.3 }}>
           {decodeHTML(track.title)}
         </div>
         <div style={{ fontSize: 11, color: "var(--walnut)", marginTop: 3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
           {decodeHTML(track.artist)}
         </div>
-      </div>
-      <div style={{
-        width: 36, height: 36, borderRadius: "50%",
-        background: isPlaying ? "var(--label-teal)" : "var(--cream-dark)",
-        display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0,
-        color: isPlaying ? "#fff" : "var(--espresso)", fontSize: 14,
-      }}>
+      </button>
+      <button
+        onClick={isQueuing || justQueued ? undefined : onQueue}
+        title="Add to queue"
+        style={{
+          width: 32, height: 32, borderRadius: "50%", flexShrink: 0,
+          background: justQueued ? "var(--label-teal)" : "var(--cream-dark)",
+          color: justQueued ? "#fff" : "var(--walnut)", fontSize: 18, fontWeight: 300,
+          display: "flex", alignItems: "center", justifyContent: "center",
+          cursor: isQueuing || justQueued ? "default" : "pointer",
+          transition: "background 0.2s",
+        }}
+      >
+        {isQueuing ? <SpinnerIcon size={14} /> : justQueued ? "✓" : "+"}
+      </button>
+      <button
+        onClick={isPlaying ? undefined : onPlay}
+        style={{
+          width: 36, height: 36, borderRadius: "50%", flexShrink: 0,
+          background: isPlaying ? "var(--label-teal)" : "var(--cream-dark)",
+          color: isPlaying ? "#fff" : "var(--espresso)", fontSize: 14,
+          display: "flex", alignItems: "center", justifyContent: "center",
+          cursor: isPlaying ? "default" : "pointer",
+        }}
+      >
         {isPlaying ? <SpinnerIcon size={16} /> : "▶"}
-      </div>
-    </button>
+      </button>
+    </div>
   );
 }
 
