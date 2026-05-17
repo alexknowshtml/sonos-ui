@@ -17,8 +17,6 @@ import {
 const SONOS = `${process.env.HOME}/bin/sonos`;
 const YT_DLP = `${process.env.HOME}/bin/yt-dlp`;
 const YT_API_KEY = process.env.GOOGLE_API_KEY ?? "";
-const YT_CLIENT_ID = process.env.YT_CLIENT_ID ?? "";
-const YT_CLIENT_SECRET = process.env.YT_CLIENT_SECRET ?? "";
 const PORT = 2650;
 
 const ytUrlCache = new Map<string, { url: string; expires: number }>();
@@ -78,14 +76,16 @@ async function getYtAccessToken(): Promise<string | null> {
   const tokenJson = getKV("yt_tokens");
   if (!tokenJson) return null;
   const tokens = JSON.parse(tokenJson);
-  if (Date.now() < tokens.expires_at - 60_000) return tokens.access_token;
-  // Refresh
+  if (tokens.access_token && Date.now() < tokens.expires_at - 60_000) return tokens.access_token;
+  const clientId = getKV("yt_client_id") ?? "";
+  const clientSecret = getKV("yt_client_secret") ?? "";
+  if (!clientId || !clientSecret || !tokens.refresh_token) return null;
   const res = await fetch("https://oauth2.googleapis.com/token", {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body: new URLSearchParams({
-      client_id: YT_CLIENT_ID,
-      client_secret: YT_CLIENT_SECRET,
+      client_id: clientId,
+      client_secret: clientSecret,
       refresh_token: tokens.refresh_token,
       grant_type: "refresh_token",
     }),
@@ -429,61 +429,16 @@ serve({
             return json(items);
           }
 
-          if (path === "/api/yt/auth") {
-            if (!YT_CLIENT_ID) return err("YT_CLIENT_ID not configured", 500);
-            const res = await fetch("https://oauth2.googleapis.com/device/code", {
-              method: "POST",
-              headers: { "Content-Type": "application/x-www-form-urlencoded" },
-              body: new URLSearchParams({
-                client_id: YT_CLIENT_ID,
-                scope: "https://www.googleapis.com/auth/youtube.readonly",
-              }),
-            });
-            if (!res.ok) return err("Failed to start device auth", 500);
-            const data: any = await res.json();
-            setKV("yt_device_code", JSON.stringify({
-              device_code: data.device_code,
-              expires_at: Date.now() + data.expires_in * 1000,
-              interval: data.interval ?? 5,
-            }));
-            return json({
-              user_code: data.user_code,
-              verification_url: data.verification_url,
-              expires_in: data.expires_in,
-              interval: data.interval ?? 5,
-            });
-          }
-
-          if (path === "/api/yt/auth/poll") {
-            const deviceJson = getKV("yt_device_code");
-            if (!deviceJson) return json({ authorized: false, error: "no_device_code" });
-            const device = JSON.parse(deviceJson);
-            if (Date.now() > device.expires_at) return json({ authorized: false, error: "expired" });
-            const res = await fetch("https://oauth2.googleapis.com/token", {
-              method: "POST",
-              headers: { "Content-Type": "application/x-www-form-urlencoded" },
-              body: new URLSearchParams({
-                client_id: YT_CLIENT_ID,
-                client_secret: YT_CLIENT_SECRET,
-                device_code: device.device_code,
-                grant_type: "urn:ietf:wg:oauth:2.0:device_code",
-              }),
-            });
-            const data: any = await res.json();
-            if (data.access_token) {
-              setKV("yt_tokens", JSON.stringify({
-                access_token: data.access_token,
-                refresh_token: data.refresh_token,
-                expires_at: Date.now() + data.expires_in * 1000,
-              }));
-              return json({ authorized: true });
-            }
-            return json({ authorized: false, pending: data.error === "authorization_pending", error: data.error ?? null });
+          if (path === "/api/yt/auth" || path === "/api/yt/auth/poll") {
+            const tokenJson = getKV("yt_tokens");
+            const authorized = !!(tokenJson && JSON.parse(tokenJson).refresh_token);
+            return json({ authorized });
           }
 
           if (path === "/api/yt/auth/status") {
             const tokenJson = getKV("yt_tokens");
-            return json({ authorized: !!tokenJson });
+            const authorized = !!(tokenJson && JSON.parse(tokenJson).refresh_token);
+            return json({ authorized });
           }
 
           if (path === "/api/yt/playlists") {
