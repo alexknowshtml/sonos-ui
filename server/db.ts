@@ -31,6 +31,17 @@ db.exec(`
     album_art TEXT,
     updated_at INTEGER NOT NULL DEFAULT (unixepoch())
   );
+  CREATE TABLE IF NOT EXISTS queue (
+    room TEXT NOT NULL,
+    position INTEGER NOT NULL,
+    title TEXT,
+    artist TEXT,
+    album TEXT,
+    album_art TEXT,
+    uri TEXT,
+    updated_at INTEGER NOT NULL DEFAULT (unixepoch()),
+    PRIMARY KEY (room, position)
+  );
 `);
 
 // Ensure now_playing row exists
@@ -101,6 +112,28 @@ export function upsertNowPlaying(data: any): void {
 
 export function getFavoritesFromDB(): any[] {
   return db.query("SELECT position, title, album_art as albumArt FROM favorites ORDER BY position").all();
+}
+
+export function getQueueFromDB(room: string): any[] {
+  return db.query("SELECT title, artist, album, album_art as albumArt, uri FROM queue WHERE room = $room ORDER BY position").all({ $room: room }) as any[];
+}
+
+export function upsertQueue(room: string, tracks: any[]): void {
+  const stmt = db.prepare(`
+    INSERT INTO queue (room, position, title, artist, album, album_art, uri, updated_at)
+    VALUES ($room, $position, $title, $artist, $album, $albumArt, $uri, unixepoch())
+    ON CONFLICT(room, position) DO UPDATE SET
+      title = excluded.title, artist = excluded.artist, album = excluded.album,
+      album_art = excluded.album_art, uri = excluded.uri, updated_at = unixepoch()
+  `);
+  const upsertMany = db.transaction((rows: any[]) => {
+    db.query("DELETE FROM queue WHERE room = $room").run({ $room: room });
+    for (let i = 0; i < rows.length; i++) {
+      const t = rows[i];
+      stmt.run({ $room: room, $position: i, $title: t.title ?? null, $artist: t.artist ?? null, $album: t.album ?? null, $albumArt: t.albumArt ?? null, $uri: t.uri ?? null });
+    }
+  });
+  upsertMany(tracks);
 }
 
 export function upsertFavorites(favs: any[]): void {

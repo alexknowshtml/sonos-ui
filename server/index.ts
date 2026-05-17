@@ -9,6 +9,7 @@ import {
   getRoomsFromDB, upsertRooms,
   getNowPlayingFromDB, upsertNowPlaying,
   getFavoritesFromDB, upsertFavorites,
+  getQueueFromDB, upsertQueue,
   updateRoomVolume as dbUpdateRoomVolume,
 } from "./db";
 
@@ -39,7 +40,6 @@ function broadcast(data: object) {
 
 let roomsCache: { data: any; ts: number } | null = null;
 let favCache: { data: any; ts: number } | null = null;
-const queueCache = new Map<string, { data: any[]; ts: number }>();
 
 initUpnp(PORT, LOCAL_IP, broadcast, () => roomsCache);
 
@@ -124,6 +124,21 @@ async function pollNowPlaying() {
   } catch {}
 }
 
+async function fetchAndCacheQueue(room: string) {
+  if (!roomsCache) await getRooms();
+  const ip = getRoomIP(room);
+  const data = await sonos(`queue list --name "${room}"`);
+  const items: any[] = Array.isArray(data) ? data : Array.isArray(data?.items) ? data.items : [];
+  const tracks = items.map((entry: any) => {
+    const t = entry.item ?? entry;
+    const rawArt: string = t.albumArtURI ?? t.albumArt ?? "";
+    const albumArt = rawArt.startsWith("/") && ip ? `http://${ip}:1400${rawArt}` : rawArt || undefined;
+    return { title: t.title, artist: t.artist, album: t.album, albumArt, uri: t.uri };
+  });
+  upsertQueue(room, tracks);
+  return tracks;
+}
+
 function startEventStream() {
   const proc = Bun.spawn([SONOS, "watch", "--name", "Controller", "--format", "json"], { stdout: "pipe", stderr: "pipe" });
   async function pump() {
@@ -154,9 +169,11 @@ startEventStream();
 getRooms().catch(() => {});
 getFavs().catch(() => {});
 pollNowPlaying();
+fetchAndCacheQueue("Controller").catch(() => {});
 setInterval(() => getRooms().catch(() => {}), 60_000);
 setInterval(() => getFavs().catch(() => {}), 300_000);
 setInterval(pollNowPlaying, 10_000);
+setInterval(() => fetchAndCacheQueue("Controller").catch(() => {}), 30_000);
 
 async function serveStatic(path: string): Promise<Response> {
   const filePath = path === "/" ? join(PUBLIC, "index.html") : join(PUBLIC, path);
@@ -215,24 +232,9 @@ serve({
           }
           if (path === "/api/queue") {
             const room = url.searchParams.get("room") || "Controller";
-            const cached = queueCache.get(room);
-            if (cached && Date.now() - cached.ts < 15_000) return json(cached.data);
-            if (!roomsCache) await getRooms();
-            const ip = getRoomIP(room);
-            const data = await sonos(`queue list --name "${room}"`);
-            const items: any[] = Array.isArray(data)
-              ? data
-              : Array.isArray(data?.items) ? data.items : [];
-            const tracks = items.map((entry: any) => {
-              const t = entry.item ?? entry;
-              const rawArt: string = t.albumArtURI ?? t.albumArt ?? "";
-              const albumArt = rawArt.startsWith("/") && ip
-                ? `http://${ip}:1400${rawArt}`
-                : rawArt || undefined;
-              return { title: t.title, artist: t.artist, album: t.album, albumArt, uri: t.uri };
-            });
-            queueCache.set(room, { data: tracks, ts: Date.now() });
-            return json(tracks);
+            const cached = getQueueFromDB(room);
+            if (cached.length > 0) return json(cached);
+            return json(await fetchAndCacheQueue(room));
           }
           if (path === "/api/state") {
             return json({ status: getNowPlayingFromDB() });
