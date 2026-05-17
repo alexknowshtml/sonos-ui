@@ -4,7 +4,6 @@ interface Props {
   nowPlaying: NowPlaying;
   rooms: Room[];
   activeRoom: string;
-  onSetRoom: (r: string) => void;
   onPlay: () => void;
   onPause: () => void;
   onNext: () => void;
@@ -14,7 +13,7 @@ interface Props {
 }
 
 export default function NowPlaying({
-  nowPlaying, rooms, activeRoom, onSetRoom,
+  nowPlaying, rooms, activeRoom,
   onPlay, onPause, onNext, onPrev, onVolume, onOpenFavs,
 }: Props) {
   const isPlaying = nowPlaying.state === "PLAYING";
@@ -141,36 +140,6 @@ export default function NowPlaying({
         </div>
       </div>
 
-      {/* Room selector */}
-      <div>
-        <div style={{
-          fontSize: 11,
-          fontWeight: 700,
-          textTransform: "uppercase",
-          letterSpacing: "0.05em",
-          color: "var(--walnut)",
-          marginBottom: 10,
-          paddingLeft: 2,
-        }}>Playing in</div>
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-          {rooms.map((r) => (
-            <button
-              key={r.name}
-              onClick={() => onSetRoom(r.name)}
-              style={{
-                padding: "10px 18px",
-                borderRadius: 24,
-                background: r.name === activeRoom ? "var(--label-teal)" : "var(--warm-white)",
-                color: r.name === activeRoom ? "var(--warm-white)" : "var(--mocha)",
-                fontWeight: 600,
-                fontSize: 14,
-                border: r.name === activeRoom ? "none" : "2px solid var(--cream-dark)",
-                boxShadow: r.name === activeRoom ? "0 2px 8px rgba(74, 155, 140, 0.3)" : "none",
-              }}
-            >{r.name}</button>
-          ))}
-        </div>
-      </div>
     </div>
   );
 }

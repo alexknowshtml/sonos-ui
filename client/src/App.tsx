@@ -110,7 +110,6 @@ export default function App() {
             nowPlaying={s.nowPlaying}
             rooms={s.rooms}
             activeRoom={s.activeRoom}
-            onSetRoom={s.setActiveRoom}
             onPlay={() => s.play()}
             onPause={() => s.pause()}
             onNext={() => s.next()}
