@@ -129,7 +129,10 @@ function ErrorBanner({ message, onDismiss }: { message: string; onDismiss: () =>
 }
 
 export default function App() {
-  const [tab, setTab] = useState<Tab>("now");
+  const [tab, setTab] = useState<Tab>(() =>
+    (localStorage.getItem("sonos-tab") as Tab) ?? "now"
+  );
+  useEffect(() => { localStorage.setItem("sonos-tab", tab); }, [tab]);
   const [showDebug, setShowDebug] = useState(false);
   const s = useSonos();
   const isTabletLandscape = useIsTabletLandscape();
