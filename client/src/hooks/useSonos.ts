@@ -51,6 +51,8 @@ export function useSonos() {
   const [commandPending, setCommandPending] = useState(false);
   const [livePosition, setLivePosition] = useState<number | undefined>(undefined);
   const [commandError, setCommandError] = useState<string | null>(null);
+  const [sseConnected, setSseConnected] = useState(false);
+  const [lastSseEventAt, setLastSseEventAt] = useState<Date | null>(null);
 
   // Ref so poll-until-changed closure always reads latest state
   const nowPlayingRef = useRef<NowPlaying>({});
@@ -145,8 +147,10 @@ export function useSonos() {
   // SSE for real-time updates
   useEffect(() => {
     const es = new EventSource(`${API}/events`);
-    es.onopen = () => refreshNowPlaying();
+    es.onopen = () => { setSseConnected(true); refreshNowPlaying(); };
+    es.onerror = () => setSseConnected(false);
     es.onmessage = (e) => {
+      setLastSseEventAt(new Date());
       try {
         const data = JSON.parse(e.data);
         if (data.type === "volume") {
@@ -268,5 +272,6 @@ export function useSonos() {
     party, dissolve, joinGroup, unjoin, solo,
     openFavorite, fetchQueue, seek,
     refresh: () => { refreshRooms(true); refreshNowPlaying(); },
+    sseConnected, lastSseEventAt,
   };
 }

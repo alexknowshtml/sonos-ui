@@ -4,6 +4,7 @@ import NowPlaying from "./components/NowPlaying";
 import Rooms from "./components/Rooms";
 import YouTubeMusic from "./components/YouTubeMusic";
 import Queue from "./components/Queue";
+import { DebugModal } from "./components/DebugModal";
 import { PlayIcon, PauseIcon, SpinnerIcon } from "./components/Icons";
 
 type Tab = "now" | "rooms" | "yt" | "queue";
@@ -129,6 +130,7 @@ function ErrorBanner({ message, onDismiss }: { message: string; onDismiss: () =>
 
 export default function App() {
   const [tab, setTab] = useState<Tab>("now");
+  const [showDebug, setShowDebug] = useState(false);
   const s = useSonos();
   const isTabletLandscape = useIsTabletLandscape();
 
@@ -168,7 +170,9 @@ export default function App() {
         </div>
         <span style={{ fontWeight: 700, fontSize: 17, color: "var(--espresso)" }}>Indy Hall</span>
       </div>
-      <button onClick={s.refresh} style={{ width: 36, height: 36, borderRadius: 10, background: "var(--cream-dark)", color: "var(--walnut)", fontSize: 18, display: "flex", alignItems: "center", justifyContent: "center" }} title="Refresh">↻</button>
+      <button onClick={() => setShowDebug(true)} style={{ width: 36, height: 36, borderRadius: 10, background: "var(--cream-dark)", color: "var(--walnut)", display: "flex", alignItems: "center", justifyContent: "center" }} title="Diagnostics">
+        <SlidersIcon />
+      </button>
     </header>
   );
 
@@ -254,6 +258,15 @@ export default function App() {
                 </button>
               ))}
         </nav>
+
+        {showDebug && (
+          <DebugModal
+            onClose={() => setShowDebug(false)}
+            activeRoom={s.activeRoom}
+            sseConnected={s.sseConnected}
+            lastSseEventAt={s.lastSseEventAt}
+          />
+        )}
       </div>
     );
   }
@@ -308,6 +321,28 @@ export default function App() {
           </button>
         ))}
       </nav>
+
+      {showDebug && (
+        <DebugModal
+          onClose={() => setShowDebug(false)}
+          activeRoom={s.activeRoom}
+          sseConnected={s.sseConnected}
+          lastSseEventAt={s.lastSseEventAt}
+        />
+      )}
     </div>
+  );
+}
+
+function SlidersIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round">
+      <line x1="2" y1="4.5" x2="16" y2="4.5" />
+      <circle cx="11.5" cy="4.5" r="2" fill="currentColor" stroke="none" />
+      <line x1="2" y1="9" x2="16" y2="9" />
+      <circle cx="6.5" cy="9" r="2" fill="currentColor" stroke="none" />
+      <line x1="2" y1="13.5" x2="16" y2="13.5" />
+      <circle cx="12" cy="13.5" r="2" fill="currentColor" stroke="none" />
+    </svg>
   );
 }
