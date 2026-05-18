@@ -47,7 +47,8 @@ export function useSonos() {
   const [favorites, setFavorites] = useState<any[]>([]);
   const [queue, setQueue] = useState<QueueTrack[]>([]);
   const [loading, setLoading] = useState(true);
-  const [activeRoom, setActiveRoom] = useState("Controller");
+  const [activeRoom, setActiveRoom] = useState(() => localStorage.getItem("sonos-room") ?? "Controller");
+  useEffect(() => { localStorage.setItem("sonos-room", activeRoom); }, [activeRoom]);
   const [commandPending, setCommandPending] = useState(false);
   const [livePosition, setLivePosition] = useState<number | undefined>(undefined);
   const [commandError, setCommandError] = useState<string | null>(null);

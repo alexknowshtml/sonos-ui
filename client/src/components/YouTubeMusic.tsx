@@ -25,7 +25,10 @@ function decodeHTML(s: string): string {
 
 export default function YouTubeMusic({ activeRoom }: Props) {
   const [authorized, setAuthorized] = useState<boolean | null>(null);
-  const [tab, setTab] = useState<"search" | "library">("search");
+  const [tab, setTab] = useState<"search" | "library">(() =>
+    (localStorage.getItem("yt-tab") as "search" | "library") ?? "search"
+  );
+  useEffect(() => { localStorage.setItem("yt-tab", tab); }, [tab]);
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<YTTrack[]>([]);
   const [searchLoading, setSearchLoading] = useState(false);
@@ -34,7 +37,10 @@ export default function YouTubeMusic({ activeRoom }: Props) {
 
   const [playlists, setPlaylists] = useState<YTPlaylist[]>([]);
   const [playlistsLoading, setPlaylistsLoading] = useState(false);
-  const [currentPlaylist, setCurrentPlaylist] = useState<YTPlaylist | null>(null);
+  const [currentPlaylist, setCurrentPlaylist] = useState<YTPlaylist | null>(() => {
+    try { return JSON.parse(localStorage.getItem("yt-playlist") ?? "null"); } catch { return null; }
+  });
+  useEffect(() => { localStorage.setItem("yt-playlist", JSON.stringify(currentPlaylist)); }, [currentPlaylist]);
   const [playlistTracks, setPlaylistTracks] = useState<YTTrack[]>([]);
   const [playlistNextPage, setPlaylistNextPage] = useState<string | null>(null);
   const [tracksLoading, setTracksLoading] = useState(false);
@@ -119,29 +125,6 @@ export default function YouTubeMusic({ activeRoom }: Props) {
     }
   }, [activeRoom]);
 
-  const [queuing, setQueuing] = useState<string | null>(null);
-  const [queuedId, setQueuedId] = useState<string | null>(null);
-
-  const queue = useCallback(async (track: YTTrack) => {
-    setQueuing(track.videoId);
-    setError(null);
-    try {
-      const res = await fetch("/api/yt/queue", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ videoId: track.videoId, room: activeRoom, title: `${track.title} — ${track.artist}` }),
-        signal: AbortSignal.timeout(90000),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error ?? "Queue failed");
-      setQueuedId(track.videoId);
-      setTimeout(() => setQueuedId(null), 2000);
-    } catch (e: any) {
-      setError(e.name === "TimeoutError" ? "Queue timed out — yt-dlp may be slow, try again" : (e.message ?? "Queue failed"));
-    } finally {
-      setQueuing(null);
-    }
-  }, [activeRoom]);
 
   if (authorized === null) {
     return (
@@ -214,7 +197,7 @@ export default function YouTubeMusic({ activeRoom }: Props) {
           {results.length > 0 && (
             <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
               {results.map((track) => (
-                <TrackRow key={track.videoId} track={track} isPlaying={playing === track.videoId} isQueuing={queuing === track.videoId} justQueued={queuedId === track.videoId} onPlay={() => play(track)} onQueue={() => queue(track)} />
+                <TrackRow key={track.videoId} track={track} isPlaying={playing === track.videoId} onPlay={() => play(track)} />
               ))}
             </div>
           )}
@@ -259,7 +242,7 @@ export default function YouTubeMusic({ activeRoom }: Props) {
           {playlistTracks.length > 0 && (
             <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
               {playlistTracks.map((track) => (
-                <TrackRow key={track.videoId} track={track} isPlaying={playing === track.videoId} isQueuing={queuing === track.videoId} justQueued={queuedId === track.videoId} onPlay={() => play(track)} onQueue={() => queue(track)} />
+                <TrackRow key={track.videoId} track={track} isPlaying={playing === track.videoId} onPlay={() => play(track)} />
               ))}
               {playlistNextPage && (
                 <button
@@ -285,7 +268,7 @@ export default function YouTubeMusic({ activeRoom }: Props) {
   );
 }
 
-function TrackRow({ track, isPlaying, isQueuing, justQueued, onPlay, onQueue }: { track: YTTrack; isPlaying: boolean; isQueuing: boolean; justQueued: boolean; onPlay: () => void; onQueue: () => void }) {
+function TrackRow({ track, isPlaying, onPlay }: { track: YTTrack; isPlaying: boolean; onPlay: () => void }) {
   return (
     <div
       style={{
@@ -306,20 +289,6 @@ function TrackRow({ track, isPlaying, isQueuing, justQueued, onPlay, onQueue }: 
         <div style={{ fontSize: 11, color: "var(--walnut)", marginTop: 3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
           {decodeHTML(track.artist)}
         </div>
-      </button>
-      <button
-        onClick={isQueuing || justQueued ? undefined : onQueue}
-        title="Add to queue"
-        style={{
-          width: 32, height: 32, borderRadius: "50%", flexShrink: 0,
-          background: justQueued ? "var(--label-teal)" : "var(--cream-dark)",
-          color: justQueued ? "#fff" : "var(--walnut)", fontSize: 18, fontWeight: 300,
-          display: "flex", alignItems: "center", justifyContent: "center",
-          cursor: isQueuing || justQueued ? "default" : "pointer",
-          transition: "background 0.2s",
-        }}
-      >
-        {isQueuing ? <SpinnerIcon size={14} /> : justQueued ? "✓" : "+"}
       </button>
       <button
         onClick={isPlaying ? undefined : onPlay}
