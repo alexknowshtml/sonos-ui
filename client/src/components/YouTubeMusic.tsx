@@ -124,14 +124,20 @@ export default function YouTubeMusic({ activeRoom }: Props) {
 
   const queue = useCallback(async (track: YTTrack) => {
     setQueuing(track.videoId);
+    setError(null);
     try {
-      await fetch("/api/yt/queue", {
+      const res = await fetch("/api/yt/queue", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ videoId: track.videoId, room: activeRoom, title: `${track.title} — ${track.artist}` }),
+        signal: AbortSignal.timeout(60000),
       });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error ?? "Queue failed");
       setQueuedId(track.videoId);
       setTimeout(() => setQueuedId(null), 2000);
+    } catch (e: any) {
+      setError(e.name === "TimeoutError" ? "Queue timed out — yt-dlp may be slow, try again" : (e.message ?? "Queue failed"));
     } finally {
       setQueuing(null);
     }

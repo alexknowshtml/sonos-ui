@@ -21,6 +21,9 @@ const PORT = 2650;
 const ytUrlCache = new Map<string, { url: string; expires: number }>();
 const YT_URL_TTL_MS = 4 * 60 * 60 * 1000;
 
+// Short-lived proxy tokens for Sonos to stream through this server
+const streamProxies = new Map<string, { url: string; expires: number }>();
+
 const INVIDIOUS = [
   "https://inv.bp.projectsegfault.net",
   "https://invidious.nerdvpn.de",
@@ -49,22 +52,33 @@ async function resolveViaInvidious(videoId: string): Promise<string | null> {
 
 async function resolveYtUrl(videoId: string): Promise<string | null> {
   const cached = ytUrlCache.get(videoId);
-  if (cached && cached.expires > Date.now()) return cached.url;
+  if (cached && cached.expires > Date.now()) {
+    console.log(`[yt] cache hit for ${videoId}`);
+    return cached.url;
+  }
 
+  console.log(`[yt] resolving ${videoId} via Invidious...`);
+  const t0 = Date.now();
   const invUrl = await resolveViaInvidious(videoId);
   if (invUrl) {
+    console.log(`[yt] Invidious OK in ${Date.now() - t0}ms`);
     ytUrlCache.set(videoId, { url: invUrl, expires: Date.now() + YT_URL_TTL_MS });
     return invUrl;
   }
+  console.log(`[yt] Invidious failed in ${Date.now() - t0}ms, falling back to yt-dlp`);
 
   const DENO = `${process.env.HOME}/.deno/bin/deno`;
+  const t1 = Date.now();
   const proc = Bun.spawn(
-    [YT_DLP, "--js-runtimes", `deno:${DENO}`, "-f", "bestaudio[ext=webm]/bestaudio",
+    [YT_DLP, "--js-runtimes", `deno:${DENO}`, "-f", "bestaudio[ext=m4a]/bestaudio[acodec=aac]/bestaudio",
      "--no-playlist", "--get-url", `https://music.youtube.com/watch?v=${videoId}`],
     { stdout: "pipe", stderr: "pipe" }
   );
   const raw = (await new Response(proc.stdout).text()).trim().split("\n")[0];
+  const stderr = await new Response(proc.stderr).text();
   await proc.exited;
+  console.log(`[yt] yt-dlp finished in ${Date.now() - t1}ms, got: ${raw?.slice(0, 60) || "nothing"}`);
+  if (stderr) console.log(`[yt] yt-dlp stderr: ${stderr.slice(0, 200)}`);
   if (raw?.startsWith("http")) {
     ytUrlCache.set(videoId, { url: raw, expires: Date.now() + YT_URL_TTL_MS });
     return raw;
@@ -343,6 +357,7 @@ async function serveStatic(path: string): Promise<Response> {
 
 serve({
   port: PORT,
+  idleTimeout: 120,
   async fetch(req) {
     const url = new URL(req.url);
     const path = url.pathname;
@@ -440,6 +455,35 @@ serve({
             const tokenJson = getKV("yt_tokens");
             const authorized = !!(tokenJson && JSON.parse(tokenJson).refresh_token);
             return json({ authorized });
+          }
+
+          if (path === "/api/yt/stream") {
+            const token = url.searchParams.get("t");
+            const entry = token ? streamProxies.get(token) : null;
+            if (!entry || entry.expires < Date.now()) {
+              console.log(`[stream] token not found or expired: ${token}`);
+              return new Response("Stream expired", { status: 410 });
+            }
+            console.log(`[stream] proxying token ${token?.slice(0, 8)}...`);
+            try {
+              const rangeHeader = req.headers.get("Range");
+              const upstream = await fetch(entry.url, {
+                headers: rangeHeader ? { Range: rangeHeader } : {},
+                signal: AbortSignal.timeout(10000),
+              });
+              const headers: Record<string, string> = {
+                "Content-Type": upstream.headers.get("Content-Type") ?? "audio/webm",
+                "Accept-Ranges": "bytes",
+              };
+              const cl = upstream.headers.get("Content-Length");
+              const cr = upstream.headers.get("Content-Range");
+              if (cl) headers["Content-Length"] = cl;
+              if (cr) headers["Content-Range"] = cr;
+              return new Response(upstream.body, { status: upstream.status, headers });
+            } catch (e: any) {
+              console.log(`[stream] proxy error: ${e.message}`);
+              return new Response("Upstream error", { status: 502 });
+            }
           }
 
           if (path === "/api/yt/playlists") {
@@ -567,22 +611,33 @@ serve({
             const { videoId, room: r, title } = b;
             if (!videoId) return err("Missing videoId", 400);
             const targetRoom = r || "Controller";
+            console.log(`[queue] request: videoId=${videoId} room=${targetRoom} title=${title}`);
             if (!roomsCache) await getRooms();
             const ip = getRoomIP(targetRoom);
-            if (!ip) return err("Room not found");
+            if (!ip) { console.log(`[queue] room not found: ${targetRoom}`); return err("Room not found"); }
+            console.log(`[queue] room ${targetRoom} = ${ip}, resolving URL...`);
+            const t0 = Date.now();
             const streamUrl = await resolveYtUrl(videoId);
+            console.log(`[queue] URL resolved in ${Date.now() - t0}ms: ${streamUrl ? "ok" : "FAILED"}`);
             if (!streamUrl) return err("Could not resolve stream URL");
+            // Sonos can't reach googlevideo.com directly — proxy through this server
+            const token = crypto.randomUUID();
+            streamProxies.set(token, { url: streamUrl, expires: Date.now() + YT_URL_TTL_MS });
+            const proxyUrl = `http://${LOCAL_IP}:${PORT}/api/yt/stream?t=${token}`;
+            console.log(`[queue] proxy URL: ${proxyUrl}`);
             const safeTitle = (title ?? videoId).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
-            const safeUrl = streamUrl.replace(/&/g, "&amp;");
-            const didl = `&lt;DIDL-Lite xmlns="urn:schemas-upnp-org:metadata-1-0/DIDL-Lite/" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:upnp="urn:schemas-upnp-org:metadata-1-0/upnp/"&gt;&lt;item id="0" parentID="0" restricted="1"&gt;&lt;dc:title&gt;${safeTitle}&lt;/dc:title&gt;&lt;upnp:class&gt;object.item.audioItem.musicTrack&lt;/upnp:class&gt;&lt;res protocolInfo="http-get:*:audio/webm:*"&gt;${safeUrl}&lt;/res&gt;&lt;/item&gt;&lt;/DIDL-Lite&gt;`;
-            const soapBody = `<?xml version="1.0"?><s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/"><s:Body><u:AddURIToQueue xmlns:u="urn:schemas-upnp-org:service:AVTransport:1"><InstanceID>0</InstanceID><EnqueuedURI>${safeUrl}</EnqueuedURI><EnqueuedURIMetaData>${didl}</EnqueuedURIMetaData><DesiredFirstTrackNumberEnqueued>0</DesiredFirstTrackNumberEnqueued><EnqueueAsNext>0</EnqueueAsNext></u:AddURIToQueue></s:Body></s:Envelope>`;
+            const didl = `&lt;DIDL-Lite xmlns="urn:schemas-upnp-org:metadata-1-0/DIDL-Lite/" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:upnp="urn:schemas-upnp-org:metadata-1-0/upnp/"&gt;&lt;item id="0" parentID="0" restricted="1"&gt;&lt;dc:title&gt;${safeTitle}&lt;/dc:title&gt;&lt;upnp:class&gt;object.item.audioItem.musicTrack&lt;/upnp:class&gt;&lt;res protocolInfo="http-get:*:audio/mp4:*"&gt;${proxyUrl}&lt;/res&gt;&lt;/item&gt;&lt;/DIDL-Lite&gt;`;
+            const soapBody = `<?xml version="1.0"?><s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/"><s:Body><u:AddURIToQueue xmlns:u="urn:schemas-upnp-org:service:AVTransport:1"><InstanceID>0</InstanceID><EnqueuedURI>${proxyUrl}</EnqueuedURI><EnqueuedURIMetaData>${didl}</EnqueuedURIMetaData><DesiredFirstTrackNumberEnqueued>0</DesiredFirstTrackNumberEnqueued><EnqueueAsNext>0</EnqueueAsNext></u:AddURIToQueue></s:Body></s:Envelope>`;
+            console.log(`[queue] sending AddURIToQueue to ${ip}:1400`);
             const res = await fetch(`http://${ip}:1400/MediaRenderer/AVTransport/Control`, {
               method: "POST",
               headers: { "Content-Type": 'text/xml; charset="utf-8"', SOAPAction: '"urn:schemas-upnp-org:service:AVTransport:1#AddURIToQueue"' },
               body: soapBody,
               signal: AbortSignal.timeout(5000),
             });
-            if (!res.ok) return err("Failed to queue track");
+            const resBody = await res.text();
+            console.log(`[queue] SOAP response: ${res.status} — ${resBody.slice(0, 300)}`);
+            if (!res.ok) return err(`Failed to queue track (${res.status}): ${resBody.slice(0, 200)}`);
             return json({ ok: true });
           }
 
