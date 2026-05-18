@@ -130,7 +130,7 @@ export default function YouTubeMusic({ activeRoom }: Props) {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ videoId: track.videoId, room: activeRoom, title: `${track.title} — ${track.artist}` }),
-        signal: AbortSignal.timeout(60000),
+        signal: AbortSignal.timeout(90000),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error ?? "Queue failed");
