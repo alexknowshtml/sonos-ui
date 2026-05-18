@@ -457,8 +457,8 @@ serve({
             return json({ authorized });
           }
 
-          if (path === "/api/yt/stream") {
-            const token = url.searchParams.get("t");
+          if (path.startsWith("/api/yt/stream/")) {
+            const token = path.split("/")[4]; // /api/yt/stream/TOKEN/title.m4a
             const entry = token ? streamProxies.get(token) : null;
             if (!entry || entry.expires < Date.now()) {
               console.log(`[stream] token not found or expired: ${token}`);
@@ -623,7 +623,8 @@ serve({
             // Sonos can't reach googlevideo.com directly — proxy through this server
             const token = crypto.randomUUID();
             streamProxies.set(token, { url: streamUrl, expires: Date.now() + YT_URL_TTL_MS });
-            const proxyUrl = `http://${LOCAL_IP}:${PORT}/api/yt/stream?t=${token}`;
+            const slug = (title ?? videoId).replace(/[^a-zA-Z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 60) || videoId;
+            const proxyUrl = `http://${LOCAL_IP}:${PORT}/api/yt/stream/${token}/${encodeURIComponent(slug)}.m4a`;
             console.log(`[queue] proxy URL: ${proxyUrl}`);
             const safeTitle = (title ?? videoId).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
             const didl = `&lt;DIDL-Lite xmlns="urn:schemas-upnp-org:metadata-1-0/DIDL-Lite/" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:upnp="urn:schemas-upnp-org:metadata-1-0/upnp/"&gt;&lt;item id="0" parentID="0" restricted="1"&gt;&lt;dc:title&gt;${safeTitle}&lt;/dc:title&gt;&lt;upnp:class&gt;object.item.audioItem.musicTrack&lt;/upnp:class&gt;&lt;res protocolInfo="http-get:*:audio/mp4:*"&gt;${proxyUrl}&lt;/res&gt;&lt;/item&gt;&lt;/DIDL-Lite&gt;`;
