@@ -1,5 +1,7 @@
 import { useState, useRef } from "react";
 import type { Room } from "../hooks/useSonos";
+import { useGroupVolume } from "../hooks/useGroupVolume";
+import GroupVolumeCard from "./GroupVolumeCard";
 
 interface Props {
   rooms: Room[];
@@ -38,12 +40,7 @@ export default function Rooms({
     }
   };
 
-  const groupIds = new Set(rooms.map((r) => r.groupId).filter(Boolean));
-  const allInOneGroup = groupIds.size === 1 && rooms.every((r) => r.groupId);
-  const sharedGroupId = allInOneGroup ? rooms[0]?.groupId : undefined;
-  const groupMaxVol = allInOneGroup
-    ? Math.max(...rooms.map((r) => r.volume ?? 0))
-    : 0;
+  const { allInOneGroup, sharedGroupId, groupMaxVol } = useGroupVolume(rooms);
 
   const sortedRooms = [...rooms].sort((a, b) => {
     if (a.coordinator && !b.coordinator) return -1;
@@ -97,38 +94,11 @@ export default function Rooms({
 
       {/* Group master volume — shown when all rooms are grouped and not suppressed by parent */}
       {showGroupVolume && allInOneGroup && sharedGroupId && (
-        <div style={{
-          background: "var(--warm-white)",
-          borderRadius: 16,
-          border: "2px solid rgba(74,155,140,0.25)",
-          padding: 16,
-        }}>
-          <div style={{
-            fontSize: 11,
-            fontWeight: 700,
-            textTransform: "uppercase",
-            letterSpacing: "0.05em",
-            color: "var(--label-teal)",
-            marginBottom: 12,
-          }}>Group Volume</div>
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <RoomStepBtn onClick={() => onGroupVolume(sharedGroupId, Math.max(0, groupMaxVol - 5))}>−</RoomStepBtn>
-            <input
-              type="range" min={0} max={100} value={groupMaxVol}
-              onChange={(e) => onGroupVolume(sharedGroupId, Number(e.target.value))}
-              style={{ flex: 1, background: sliderFill(groupMaxVol) }}
-            />
-            <RoomStepBtn onClick={() => onGroupVolume(sharedGroupId, Math.min(100, groupMaxVol + 5))}>+</RoomStepBtn>
-            <span style={{
-              fontSize: 13,
-              fontWeight: 600,
-              fontVariantNumeric: "tabular-nums",
-              color: "var(--mocha)",
-              minWidth: 34,
-              textAlign: "right",
-            }}>{groupMaxVol}%</span>
-          </div>
-        </div>
+        <GroupVolumeCard
+          groupId={sharedGroupId}
+          vol={groupMaxVol}
+          onGroupVolume={onGroupVolume}
+        />
       )}
 
       {/* Coordinator card - always first */}

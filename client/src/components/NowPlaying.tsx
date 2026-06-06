@@ -1,4 +1,5 @@
 import type { NowPlaying, Room } from "../hooks/useSonos";
+import { useGroupVolume } from "../hooks/useGroupVolume";
 import { PlayIcon, PauseIcon, SkipBackIcon, SkipForwardIcon, SpinnerIcon } from "./Icons";
 
 interface Props {
@@ -23,10 +24,7 @@ export default function NowPlaying({
   const isIdle = !nowPlaying.title && !isPlaying;
   const room = rooms.find((r) => r.name === activeRoom);
 
-  const groupIds = new Set(rooms.map((r) => r.groupId).filter(Boolean));
-  const allInOneGroup = groupIds.size === 1 && rooms.every((r) => r.groupId);
-  const sharedGroupId = allInOneGroup ? rooms[0]?.groupId : undefined;
-  const groupMaxVol = allInOneGroup ? Math.max(...rooms.map((r) => r.volume ?? 0)) : 0;
+  const { allInOneGroup, sharedGroupId, groupMaxVol } = useGroupVolume(rooms);
 
   const vol = allInOneGroup ? groupMaxVol : (room?.volume ?? 30);
   const handleVolume = (v: number) =>
