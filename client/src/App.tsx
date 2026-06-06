@@ -190,6 +190,7 @@ export default function App() {
       onNext={() => s.next()}
       onPrev={() => s.prev()}
       onVolume={s.setVolume}
+      onGroupVolume={s.setGroupVolume}
       onOpenFavs={() => setTab("yt")}
     />
   );
@@ -232,6 +233,7 @@ export default function App() {
                 onDissolve={s.dissolve}
                 onJoin={s.joinGroup}
                 onUnjoin={s.unjoin}
+                showGroupVolume={false}
               />
             )}
             {tab === "yt" && <YouTubeMusic activeRoom={s.activeRoom} />}

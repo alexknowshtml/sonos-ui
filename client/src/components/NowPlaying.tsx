@@ -11,17 +11,28 @@ interface Props {
   onNext: () => void;
   onPrev: () => void;
   onVolume: (room: string, v: number) => void;
+  onGroupVolume: (groupId: string, v: number) => void;
   onOpenFavs: () => void;
 }
 
 export default function NowPlaying({
   nowPlaying, rooms, activeRoom, commandPending,
-  onPlay, onPause, onNext, onPrev, onVolume, onOpenFavs,
+  onPlay, onPause, onNext, onPrev, onVolume, onGroupVolume, onOpenFavs,
 }: Props) {
   const isPlaying = nowPlaying.state === "PLAYING";
   const isIdle = !nowPlaying.title && !isPlaying;
   const room = rooms.find((r) => r.name === activeRoom);
-  const vol = room?.volume ?? 30;
+
+  const groupIds = new Set(rooms.map((r) => r.groupId).filter(Boolean));
+  const allInOneGroup = groupIds.size === 1 && rooms.every((r) => r.groupId);
+  const sharedGroupId = allInOneGroup ? rooms[0]?.groupId : undefined;
+  const groupMaxVol = allInOneGroup ? Math.max(...rooms.map((r) => r.volume ?? 0)) : 0;
+
+  const vol = allInOneGroup ? groupMaxVol : (room?.volume ?? 30);
+  const handleVolume = (v: number) =>
+    allInOneGroup && sharedGroupId
+      ? onGroupVolume(sharedGroupId, v)
+      : onVolume(activeRoom, v);
 
   return (
     <div style={{ padding: "20px 16px", display: "flex", flexDirection: "column", gap: 20 }}>
@@ -129,16 +140,24 @@ export default function NowPlaying({
         padding: 16,
         border: "2px solid var(--cream-dark)",
       }}>
+        <div style={{
+          fontSize: 11,
+          fontWeight: 700,
+          textTransform: "uppercase",
+          letterSpacing: "0.05em",
+          color: "var(--label-teal)",
+          marginBottom: 10,
+        }}>{allInOneGroup ? "Group Volume" : "Volume"}</div>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <StepBtn onClick={() => onVolume(activeRoom, Math.max(0, vol - 5))}>−</StepBtn>
+          <StepBtn onClick={() => handleVolume(Math.max(0, vol - 5))}>−</StepBtn>
           <div style={{ flex: 1 }}>
             <input
               type="range" min={0} max={100} value={vol}
-              onChange={(e) => onVolume(activeRoom, Number(e.target.value))}
+              onChange={(e) => handleVolume(Number(e.target.value))}
               style={{ background: `linear-gradient(to right, var(--label-teal) ${vol}%, var(--cream-dark) ${vol}%)` }}
             />
           </div>
-          <StepBtn onClick={() => onVolume(activeRoom, Math.min(100, vol + 5))}>+</StepBtn>
+          <StepBtn onClick={() => handleVolume(Math.min(100, vol + 5))}>+</StepBtn>
           <span style={{ fontSize: 13, fontWeight: 600, fontVariantNumeric: "tabular-nums", color: "var(--mocha)", minWidth: 34, textAlign: "right" }}>{vol}%</span>
         </div>
       </div>

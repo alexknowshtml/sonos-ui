@@ -12,6 +12,7 @@ interface Props {
   onDissolve: () => void;
   onJoin: (room: string, to: string) => void;
   onUnjoin: (room: string) => void;
+  showGroupVolume?: boolean;
 }
 
 function sliderFill(val: number) {
@@ -21,6 +22,7 @@ function sliderFill(val: number) {
 export default function Rooms({
   rooms, activeRoom, onSetRoom,
   onVolume, onMute, onGroupVolume, onParty, onDissolve, onJoin, onUnjoin,
+  showGroupVolume = true,
 }: Props) {
   const [dissolvePending, setDissolvePending] = useState(false);
   const dissolveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -93,8 +95,8 @@ export default function Rooms({
         </div>
       )}
 
-      {/* Group master volume — shown when all rooms are grouped */}
-      {allInOneGroup && sharedGroupId && (
+      {/* Group master volume — shown when all rooms are grouped and not suppressed by parent */}
+      {showGroupVolume && allInOneGroup && sharedGroupId && (
         <div style={{
           background: "var(--warm-white)",
           borderRadius: 16,
